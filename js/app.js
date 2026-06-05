@@ -48,7 +48,8 @@ function toast(msg) {
 let settings = store.loadSettings();
 let stats = store.loadStats();
 let game = null;          // active game state
-let net = null;           // { peer, mode, role, oppDone }
+let net = null;           // { peer, mode, role, oppDone, oppName, oppSel }
+let resumeMp = null;      // { mode, oppName } when a saved/dropped co-op game can be re-paired
 let cells = [];           // 81 cell DOM nodes
 let tick = null;          // timer interval
 
@@ -146,6 +147,7 @@ function buildBoard() {
 // New game
 // ---------------------------------------------------------------------------
 async function newGame(difficulty) {
+  resumeMp = null;
   show($('#loading'));
   // Yield so the overlay paints before the (sometimes ~200ms) generation.
   await new Promise(r => setTimeout(r, 30));
@@ -179,9 +181,10 @@ function startGame(state, fromNet = false) {
   setNotesMode(false);
   renderAll();
   startTimer();
-  if (!fromNet) persist();
+  persist();
   // multiplayer banner
   if (net) updateCoopBanner();
+  else if (resumeMp) showReconnectBanner();
   else hide($('#coopBanner'));
 }
 
@@ -489,12 +492,14 @@ function endGame(won) {
 // Persistence
 // ---------------------------------------------------------------------------
 function persist() {
-  if (!game || net) return; // don't persist networked games
+  if (!game) return;
   if (game.status === 'won' || game.status === 'lost') return;
   store.saveGame({
     puzzle: game.puzzle, solution: game.solution, grid: game.grid, notes: game.notes,
     difficulty: game.difficulty, seed: game.seed, mistakes: game.mistakes,
     hints: game.hints, score: game.score, elapsed: game.elapsed, status: 'playing',
+    // Remember the partner so a closed tab / dropped link can re-pair and resume.
+    mp: net ? { mode: net.mode, oppName: net.oppName } : (resumeMp || null),
   });
 }
 
@@ -507,7 +512,10 @@ function updateHome() {
   const btn = $('#continueBtn');
   if (saved && saved.status === 'playing') {
     show(btn);
-    $('#continueMeta').textContent = `${DIFF_META[saved.difficulty].label} · ${fmt(saved.elapsed)}`;
+    const meta = `${DIFF_META[saved.difficulty].label} · ${fmt(saved.elapsed)}`;
+    $('#continueMeta').textContent = saved.mp
+      ? `${meta} · with ${saved.mp.oppName || 'partner'}`
+      : meta;
   } else hide(btn);
 }
 
@@ -539,14 +547,33 @@ function sendProgress() {
 }
 function showOpp(text) {
   const b = $('#coopBanner');
-  show(b); b.textContent = text;
+  show(b); b.textContent = text; b.classList.remove('reconnect');
 }
-const oppName = () => (net && net.oppName) || 'your partner';
+const oppName = () => (net && net.oppName) || (resumeMp && resumeMp.oppName) || 'your partner';
 
 // Refresh the in-game banner from current mode + opponent name.
 function updateCoopBanner() {
   if (!net) return hide($('#coopBanner'));
   showOpp(net.mode === 'coop' ? `Co-op with ${oppName()}` : `Versus ${oppName()} — race on!`);
+}
+
+// Offer to re-pair after a closed tab or dropped link (the live P2P link can't
+// survive on its own, but the board is saved so both can resync the same game).
+function showReconnectBanner() {
+  if (!resumeMp) return hide($('#coopBanner'));
+  const b = $('#coopBanner');
+  show(b); b.classList.add('reconnect');
+  b.textContent = `↻ Tap to reconnect with ${resumeMp.oppName || 'your partner'}`;
+}
+
+function openReconnect() {
+  if (!resumeMp || net) return;
+  $('#mpName').value = store.loadName();
+  const radio = $(`input[name=mpmode][value="${resumeMp.mode}"]`);
+  if (radio) radio.checked = true;
+  mpView('mpStart');
+  mpStatus(`Reconnect with ${resumeMp.oppName || 'your partner'} — one of you taps “Host a game”, the other “Join a game”.`);
+  show($('#mpSheet'));
 }
 
 function wireNet(peer, mode, role) {
@@ -558,14 +585,24 @@ function wireNet(peer, mode, role) {
       net.oppName = (msg.name || '').trim() || 'Player';
       if (game) updateCoopBanner();
     } else if (msg.t === 'init') {
-      // guest receives the puzzle from host
+      // guest receives the puzzle (or a resync) from host
       net.mode = msg.mode;
       if (msg.name) net.oppName = msg.name;
-      startGame({
-        puzzle: msg.puzzle, solution: msg.solution, grid: msg.puzzle.slice(),
-        notes: blankNotes(), difficulty: msg.difficulty, seed: msg.seed,
-        mistakes: 0, hints: MAX_HINTS, score: 0, elapsed: 0, selected: null, status: 'playing',
-      }, true);
+      if (msg.keep && game) {
+        // Versus resume: keep our own restored board, just re-link.
+        resumeMp = null;
+        updateCoopBanner();
+      } else {
+        // Fresh game, or co-op resume where we adopt the host's current board.
+        startGame({
+          puzzle: msg.puzzle, solution: msg.solution,
+          grid: msg.grid ? msg.grid.slice() : msg.puzzle.slice(),
+          notes: msg.notes ? msg.notes.map(a => a.slice()) : blankNotes(),
+          difficulty: msg.difficulty, seed: msg.seed,
+          mistakes: msg.mistakes || 0, hints: msg.hints != null ? msg.hints : MAX_HINTS,
+          score: msg.score || 0, elapsed: msg.elapsed || 0, selected: null, status: 'playing',
+        }, true);
+      }
       closeMpSheet();
       toast(`Connected with ${oppName()}!`);
     } else if (msg.t === 'move') {
@@ -585,7 +622,17 @@ function wireNet(peer, mode, role) {
     }
   });
   peer.on('close', () => {
-    if (net) { toast('Connection lost'); showOpp('Disconnected'); }
+    if (!net) return; // we tore it down deliberately (leaving / new game)
+    toast('Connection lost');
+    if (game && game.status === 'playing') {
+      // Keep the partner around so the player can re-pair and resume in sync.
+      resumeMp = { mode: net.mode, oppName: net.oppName };
+      net = null;
+      persist();
+      showReconnectBanner();
+    } else {
+      showOpp('Disconnected');
+    }
   });
 }
 
@@ -606,18 +653,37 @@ function mpView(name) {
 }
 function mpStatus(text, cls = '') { const s = $('#mpStatus'); s.textContent = text; s.className = 'mp-status ' + cls; }
 function closeMpSheet() { closeScanner(); hide($('#mpSheet')); }
+// During a resume the mode is fixed to the saved game; otherwise read the radios.
+const currentMode = () => (resumeMp ? resumeMp.mode : $('input[name=mpmode]:checked').value);
 
 async function mpHost() {
-  const mode = $('input[name=mpmode]:checked').value;
+  const mode = currentMode();
   const difficulty = $('#mpDifficulty').value;
+  const resuming = !!(resumeMp && game);
   commitName();
   mpView('mpHost');
   mpStatus('Creating invite…');
   const peer = new Peer();
   pendingPeer = peer;
   wireNet(peer, mode, 'host');
+  if (resuming && resumeMp.oppName) net.oppName = resumeMp.oppName;
   peer.on('open', async () => {
     mpStatus('Connected!', 'ok');
+    if (resuming) {
+      // Resume: keep our restored board and ship it so the partner resyncs.
+      const msg = { t: 'init', mode, name: myName, puzzle: game.puzzle, solution: game.solution,
+        difficulty: game.difficulty, seed: game.seed };
+      if (mode === 'coop') Object.assign(msg, { grid: game.grid, notes: game.notes,
+        elapsed: game.elapsed, mistakes: game.mistakes, score: game.score, hints: game.hints });
+      else msg.keep = true; // versus: each side keeps its own board
+      peer.send(msg);
+      resumeMp = null;
+      updateCoopBanner();
+      persist();
+      closeMpSheet();
+      toast(`Reconnected with ${oppName()}!`);
+      return;
+    }
     // Host generates the puzzle and ships it (plus its name) to the guest.
     show($('#loading'));
     await new Promise(r => setTimeout(r, 30));
@@ -647,7 +713,7 @@ async function mpConnectHost(code) {
 }
 
 function mpJoinStart() {
-  const mode = $('input[name=mpmode]:checked').value;
+  const mode = currentMode();
   commitName();
   mpView('mpJoin');
   hide($('#mpJoinReply'));
@@ -739,6 +805,7 @@ function readSettingsUI() {
 function leaveGame() {
   stopTimer();
   if (net) { try { net.peer.close(); } catch {} net = null; }
+  resumeMp = null;
   game = null;
   updateHome();
   goto('home');
@@ -763,9 +830,11 @@ function init() {
   $('#newGameBtn').onclick = openDifficultySheet;
   $('#continueBtn').onclick = () => {
     const saved = store.loadGame();
-    if (saved) { net = null; startGame({ ...saved, selected: null }, true); }
+    if (saved) { net = null; resumeMp = saved.mp || null; startGame({ ...saved, selected: null }, true); }
   };
+  $('#coopBanner').onclick = () => { if (resumeMp && !net) openReconnect(); };
   $('#multiplayerBtn').onclick = () => {
+    resumeMp = null; // the Play Together button always starts a fresh session
     $('#mpName').value = store.loadName();
     mpView('mpStart'); mpStatus(''); show($('#mpSheet'));
   };

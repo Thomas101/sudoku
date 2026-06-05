@@ -213,6 +213,12 @@ body { display: flex; justify-content: center; }
   background: #fff4e0; color: #9a6400; border: 1px solid #ffd98a;
   font-size: 12px; padding: 4px 12px; border-radius: 20px; white-space: nowrap;
 }
+/* Tappable "reconnect" state after a closed tab / dropped link. */
+.coop-banner.reconnect {
+  background: var(--cell-peer); color: var(--entry); border-color: var(--blue);
+  cursor: pointer; font-weight: 600;
+}
+.coop-banner.reconnect:active { transform: scale(.97); }
 
 /* ---------- tools ---------- */
 .tools {
