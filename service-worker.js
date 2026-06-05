@@ -1,6 +1,6 @@
 // service-worker.js — offline app shell. Paths are relative so the app works
 // from a GitHub Pages project subpath (e.g. /sudoku/) without changes.
-const CACHE = 'sudoku-v6';
+const CACHE = 'sudoku-v7';
 const ASSETS = [
   '.',
   'index.html',
@@ -9,6 +9,8 @@ const ASSETS = [
   'js/sudoku.js',
   'js/storage.js',
   'js/multiplayer.js',
+  'js/sdp.js',
+  'js/sound.js',
   'js/qr.js',
   'js/haptics.js',
   'js/vendor/qrcode.js',

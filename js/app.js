@@ -4,6 +4,7 @@ import * as store from './storage.js';
 import { Peer } from './multiplayer.js';
 import { renderQR, startScanner } from './qr.js';
 import { haptic, setHaptics } from './haptics.js';
+import * as sound from './sound.js';
 
 // ---------------------------------------------------------------------------
 // Difficulty presentation
@@ -652,17 +653,54 @@ function mpView(name) {
   show($('#' + name));
 }
 function mpStatus(text, cls = '') { const s = $('#mpStatus'); s.textContent = text; s.className = 'mp-status ' + cls; }
-function closeMpSheet() { closeScanner(); hide($('#mpSheet')); }
+function closeMpSheet() { closeScanner(); stopSoundPairing(); hide($('#mpSheet')); }
 // During a resume the mode is fixed to the saved game; otherwise read the radios.
 const currentMode = () => (resumeMp ? resumeMp.mode : $('input[name=mpmode]:checked').value);
 
-async function mpHost() {
+// ---- sound pairing helpers ----
+// Each over-the-air payload is the minified offer/answer prefixed with a 1-byte
+// tag, so a device ignores the echo of its own chirp.
+const TAG_OFFER = 0x4f /* 'O' */, TAG_ANSWER = 0x41 /* 'A' */;
+function tagged(tag, bytes) { const out = new Uint8Array(bytes.length + 1); out[0] = tag; out.set(bytes, 1); return out; }
+
+// Drop a half-finished pairing attempt (e.g. switching QR ↔ sound) without its
+// teardown tripping the "connection lost" handling — null `net` first so the
+// discarded peer's close event is ignored.
+function discardPending() {
+  if (!pendingPeer) return;
+  const p = pendingPeer;
+  pendingPeer = null; net = null;
+  try { p.close(); } catch {}
+}
+
+let soundStopListen = null;  // releases the mic
+let soundChirping = false;   // gates the transmit loop
+async function startSoundListen(onBytes) {
+  try { soundStopListen = await sound.listen(onBytes); }
+  catch { mpStatus('Microphone needed for sound pairing. Allow mic access and try again.', 'err'); }
+}
+async function startSoundChirp(msg, isDone) {
+  if (soundChirping) return;
+  soundChirping = true;
+  while (soundChirping && !isDone()) {
+    try { await sound.send(msg); } catch { break; }
+    await new Promise(r => setTimeout(r, 700)); // brief gap so the partner can reply
+  }
+  soundChirping = false;
+}
+function stopSoundPairing() {
+  soundChirping = false;
+  if (soundStopListen) { try { soundStopListen(); } catch {} soundStopListen = null; }
+}
+
+// Build the host peer and the "what to do once connected" logic, independent of
+// the signalling transport (QR or sound). Returns the wired Peer.
+function prepareHostPeer() {
+  discardPending();
   const mode = currentMode();
   const difficulty = $('#mpDifficulty').value;
   const resuming = !!(resumeMp && game);
   commitName();
-  mpView('mpHost');
-  mpStatus('Creating invite…');
   const peer = new Peer();
   pendingPeer = peer;
   wireNet(peer, mode, 'host');
@@ -697,11 +735,38 @@ async function mpHost() {
     }, true);
     closeMpSheet();
   });
+  return peer;
+}
+
+async function mpHost() {
+  const peer = prepareHostPeer();
+  mpView('mpHost');
+  mpStatus('Creating invite…');
   try {
     const code = await peer.createOffer();
     renderQR($('#mpHostQR'), code);
     mpStatus('Waiting for your partner to scan…');
   } catch (e) { mpStatus('Could not create invite: ' + e.message, 'err'); }
+}
+
+// Host over sound: chirp our offer on a loop while listening for the reply.
+async function mpHostSound() {
+  if (!sound.available()) return mpStatus('Sound pairing needs the ggwave library — see js/vendor/README.', 'err');
+  const peer = prepareHostPeer();
+  mpView('mpHost');
+  mpStatus('🔊 Starting…');
+  let offer;
+  try { offer = await peer.createOfferBytes(); }
+  catch (e) { return mpStatus('Could not start sound pairing: ' + e.message, 'err'); }
+  let answered = false;
+  await startSoundListen(async bytes => {
+    if (answered || bytes[0] !== TAG_ANSWER) return; // ignore our own offer echo
+    answered = true;
+    try { await peer.acceptAnswerBytes(bytes.slice(1)); mpStatus('🔊 Got the reply — connecting…', 'ok'); }
+    catch { answered = false; mpStatus('Reply was garbled — keep holding still…'); }
+  });
+  mpStatus('🔊 Hold your phones together…');
+  startSoundChirp(tagged(TAG_OFFER, offer), () => answered);
 }
 
 // Host scans the guest's reply QR to complete the handshake.
@@ -712,16 +777,43 @@ async function mpConnectHost(code) {
   catch (e) { mpStatus('That reply code didn’t scan cleanly — try again.', 'err'); }
 }
 
-function mpJoinStart() {
+function prepareGuestPeer() {
+  discardPending();
   const mode = currentMode();
   commitName();
-  mpView('mpJoin');
-  hide($('#mpJoinReply'));
-  mpStatus('Scan the invite to continue.');
   const peer = new Peer();
   pendingPeer = peer;
   wireNet(peer, mode, 'guest');
   peer.on('open', () => mpStatus('Connected! Waiting for puzzle…', 'ok'));
+  return peer;
+}
+
+function mpJoinStart() {
+  prepareGuestPeer();
+  mpView('mpJoin');
+  hide($('#mpJoinReply'));
+  mpStatus('Scan the invite to continue.');
+}
+
+// Join over sound: listen for the host's offer, then chirp our reply back.
+async function mpJoinSound() {
+  if (!sound.available()) return mpStatus('Sound pairing needs the ggwave library — see js/vendor/README.', 'err');
+  const peer = prepareGuestPeer();
+  mpView('mpJoin');
+  hide($('#mpJoinReply'));
+  mpStatus('🔊 Listening for an invite — hold your phones together…');
+  let handled = false;
+  await startSoundListen(async bytes => {
+    if (handled || bytes[0] !== TAG_OFFER) return;
+    handled = true;
+    let answer;
+    try { answer = await peer.acceptOfferBytes(bytes.slice(1)); }
+    catch { handled = false; mpStatus('Invite was garbled — keep holding still…'); return; }
+    mpStatus('🔊 Heard it — replying…', 'ok');
+    // Chirp the answer until the data channel opens (init message arrives).
+    startSoundChirp(tagged(TAG_ANSWER, answer),
+      () => !!(net && net.peer && net.peer.channel && net.peer.channel.readyState === 'open'));
+  });
 }
 
 // Guest consumes a scanned invite and produces a reply QR to show back.
@@ -890,10 +982,14 @@ function init() {
   $('#mpClose').onclick = () => { if (pendingPeer && !net?.peer?.channel) { try { pendingPeer.close(); } catch {} } closeMpSheet(); };
   $('#mpHostBtn').onclick = mpHost;
   $('#mpJoinBtn').onclick = mpJoinStart;
+  $('#mpHostSound').onclick = mpHostSound;
+  $('#mpJoinSound').onclick = mpJoinSound;
   $('#mpScanReply').onclick = () => openScanner(code => mpConnectHost(code));
   $('#mpScanInvite').onclick = () => openScanner(code => joinWithOffer(code));
   $('#scanCancel').onclick = closeScanner;
-  $$('.mp-back').forEach(b => b.onclick = () => { closeScanner(); mpView('mpStart'); mpStatus(''); });
+  $$('.mp-back').forEach(b => b.onclick = () => { closeScanner(); stopSoundPairing(); mpView('mpStart'); mpStatus(''); });
+  // Hide the "Pair by sound" controls unless the ggwave modem is present.
+  if (!sound.available()) $$('[data-sound]').forEach(hide);
 
   // persist on hide/close
   document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
