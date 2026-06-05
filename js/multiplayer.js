@@ -1,19 +1,53 @@
-// multiplayer.js — serverless 1:1 connection over WebRTC.
+// multiplayer.js — serverless, local-network 1:1 connection over WebRTC.
 //
-// No signaling server: the SDP offer/answer (with ICE candidates bundled in
-// once gathering completes) is encoded to a short base64 "code" that the two
-// players copy/paste to each other. Public STUN helps NAT traversal; same
-// Wi-Fi always works, most home networks work over the internet too.
+// No signaling server and no STUN: with an empty ICE config the browser only
+// gathers local host / mDNS (.local) candidates, so the two devices connect
+// directly across the same Wi-Fi / LAN and nothing leaves the network. The SDP
+// offer/answer (candidates bundled in once gathering completes) is deflated and
+// base64url-encoded into a compact "code" the players exchange via QR or paste.
 
-const ICE = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
+const ICE = { iceServers: [] };
 
-const encode = obj => btoa(JSON.stringify(obj));
-const decode = str => JSON.parse(atob(str.trim()));
+// ---- compact code <-> session description ----
+function b64urlEncode(bytes) {
+  let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(str);
+  const a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return a;
+}
+async function deflate(text) {
+  const cs = new CompressionStream('deflate-raw');
+  const w = cs.writable.getWriter(); w.write(new TextEncoder().encode(text)); w.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+}
+async function inflate(bytes) {
+  const ds = new DecompressionStream('deflate-raw');
+  const w = ds.writable.getWriter(); w.write(bytes); w.close();
+  return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());
+}
+
+// Encode a session description to a code. 'D' prefix = deflated, 'P' = plain
+// base64 (fallback for browsers without CompressionStream).
+async function encode(desc) {
+  const json = JSON.stringify({ t: desc.type === 'offer' ? 'o' : 'a', s: desc.sdp });
+  if (typeof CompressionStream !== 'undefined') return 'D' + b64urlEncode(await deflate(json));
+  return 'P' + b64urlEncode(new TextEncoder().encode(json));
+}
+async function decode(code) {
+  code = code.trim();
+  const tag = code[0], body = code.slice(1);
+  let json;
+  if (tag === 'D') json = await inflate(b64urlDecode(body));
+  else if (tag === 'P') json = new TextDecoder().decode(b64urlDecode(body));
+  else json = code; // tolerate a raw JSON paste
+  const o = JSON.parse(json);
+  return { type: o.t === 'o' ? 'offer' : 'answer', sdp: o.s };
+}
 
 // Resolve once ICE gathering finishes so the localDescription carries every
 // candidate — that lets us ship a single code instead of trickling.
@@ -73,13 +107,13 @@ export class Peer {
 
   // Host: finish the handshake with the guest's reply code.
   async acceptAnswer(code) {
-    await this.pc.setRemoteDescription(decode(code));
+    await this.pc.setRemoteDescription(await decode(code));
   }
 
   // Guest: consume an invite code and produce a reply code.
   async acceptOffer(code) {
     this.pc.addEventListener('datachannel', e => this._bindChannel(e.channel));
-    await this.pc.setRemoteDescription(decode(code));
+    await this.pc.setRemoteDescription(await decode(code));
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
     await waitForIce(this.pc);

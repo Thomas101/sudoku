@@ -2,6 +2,7 @@
 import { generatePuzzle, solve, DIFFICULTIES } from './sudoku.js';
 import * as store from './storage.js';
 import { Peer } from './multiplayer.js';
+import { renderQR, startScanner } from './qr.js';
 
 // ---------------------------------------------------------------------------
 // Difficulty presentation
@@ -492,7 +493,7 @@ function mpView(name) {
   show($('#' + name));
 }
 function mpStatus(text, cls = '') { const s = $('#mpStatus'); s.textContent = text; s.className = 'mp-status ' + cls; }
-function closeMpSheet() { hide($('#mpSheet')); }
+function closeMpSheet() { closeScanner(); hide($('#mpSheet')); }
 
 async function mpHost() {
   const mode = $('input[name=mpmode]:checked').value;
@@ -520,13 +521,14 @@ async function mpHost() {
   try {
     const code = await peer.createOffer();
     $('#mpOfferOut').value = code;
-    mpStatus('Share the invite, then paste their reply.');
+    renderQR($('#mpHostQR'), code);
+    mpStatus('Waiting for your partner to scan…');
   } catch (e) { mpStatus('Could not create invite: ' + e.message, 'err'); }
 }
 
-async function mpConnectHost() {
-  const code = $('#mpAnswerIn').value.trim();
-  if (!code) return mpStatus('Paste the reply code first.', 'err');
+async function mpConnectHost(code) {
+  code = (code || $('#mpAnswerIn').value).trim();
+  if (!code) return mpStatus('No reply code yet.', 'err');
   try { await pendingPeer.acceptAnswer(code); mpStatus('Connecting…'); }
   catch (e) { mpStatus('Invalid reply code.', 'err'); }
 }
@@ -534,21 +536,41 @@ async function mpConnectHost() {
 function mpJoinStart() {
   const mode = $('input[name=mpmode]:checked').value;
   mpView('mpJoin');
-  mpStatus('Paste the invite to continue.');
+  hide($('#mpJoinReply'));
+  mpStatus('Scan the invite to continue.');
   const peer = new Peer();
   pendingPeer = peer;
   wireNet(peer, mode, 'guest');
   peer.on('open', () => mpStatus('Connected! Waiting for puzzle…', 'ok'));
 }
 
-async function mpGenAnswer() {
-  const code = $('#mpOfferIn').value.trim();
-  if (!code) return mpStatus('Paste the invite code first.', 'err');
+// Guest consumes an invite (scanned or pasted) and produces a reply.
+async function joinWithOffer(code) {
+  code = (code || '').trim();
+  if (!code) return mpStatus('No invite code yet.', 'err');
   try {
     const answer = await pendingPeer.acceptOffer(code);
     $('#mpAnswerOut').value = answer;
-    mpStatus('Send the reply back to the host.');
+    renderQR($('#mpJoinQR'), answer);
+    show($('#mpJoinReply'));
+    mpStatus('Show the reply to the host.');
   } catch (e) { mpStatus('Invalid invite code.', 'err'); }
+}
+
+// ---- camera scanner ----
+let stopScan = null;
+async function openScanner(onCode) {
+  show($('#scanner'));
+  try {
+    stopScan = await startScanner($('#scanVideo'), code => { closeScanner(); onCode(code); });
+  } catch (e) {
+    closeScanner();
+    toast('Camera unavailable — use a code instead');
+  }
+}
+function closeScanner() {
+  if (stopScan) { stopScan(); stopScan = null; }
+  hide($('#scanner'));
 }
 
 async function copyText(text) {
@@ -671,11 +693,14 @@ function init() {
   $('#mpClose').onclick = () => { if (pendingPeer && !net?.peer?.channel) { try { pendingPeer.close(); } catch {} } closeMpSheet(); };
   $('#mpHostBtn').onclick = mpHost;
   $('#mpJoinBtn').onclick = mpJoinStart;
-  $('#mpConnectHost').onclick = mpConnectHost;
-  $('#mpGenAnswer').onclick = mpGenAnswer;
+  $('#mpScanReply').onclick = () => openScanner(code => mpConnectHost(code));
+  $('#mpScanInvite').onclick = () => openScanner(code => joinWithOffer(code));
+  $('#mpConnectHost').onclick = () => mpConnectHost();
+  $('#mpGenAnswer').onclick = () => joinWithOffer($('#mpOfferIn').value);
   $('#mpCopyOffer').onclick = () => copyText($('#mpOfferOut').value);
   $('#mpCopyAnswer').onclick = () => copyText($('#mpAnswerOut').value);
-  $$('.mp-back').forEach(b => b.onclick = () => { mpView('mpStart'); mpStatus(''); });
+  $('#scanCancel').onclick = closeScanner;
+  $$('.mp-back').forEach(b => b.onclick = () => { closeScanner(); mpView('mpStart'); mpStatus(''); });
 
   // persist on hide/close
   document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });

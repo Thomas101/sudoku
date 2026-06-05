@@ -20,10 +20,14 @@ straight onto GitHub Pages.
 - **Touch-first, desktop-friendly** — big tap targets on mobile; full keyboard
   support on desktop (digits to fill, arrows to move, `N` notes, `H` hint,
   `U` undo, `Backspace` erase).
-- **Play Together (no server)** — two devices connect directly via WebRTC. You
-  exchange a short invite/reply code once (copy-paste), then play:
+- **Play Together (no server)** — two devices on the same Wi-Fi connect directly
+  via WebRTC. **Scan a QR** to pair (or paste a code as a fallback), then play:
   - **Co-op** — one shared board, both of you filling it in together.
   - **Versus** — same puzzle, separate boards, race to finish.
+
+  Nothing leaves your network: with no STUN/TURN configured, the browsers only
+  use local (host / mDNS) candidates, so the link is strictly device-to-device
+  over the LAN.
 - **Installable & offline** — manifest + service worker, so it installs to your
   home screen and works with no connection.
 
@@ -56,13 +60,22 @@ All paths are relative and a `.nojekyll` file is included, so it works from a
 project subpath without any configuration. The repo can stay private until you
 flip it public to enable Pages.
 
-### A note on "Play Together" over the internet
+### How "Play Together" pairs (and the camera caveat)
 
-The peer-to-peer connection uses public STUN servers to find a route between the
-two devices. On the same Wi-Fi it always connects; across the internet most home
-networks work too. Some strict/corporate NATs would need a TURN relay (which
-*does* require a server) — that's the one trade-off of staying fully serverless.
-On a flaky network, retry, or play on the same Wi-Fi.
+WebRTC needs the two devices to swap a one-time "offer" and "answer" before they
+connect. This app carries that handshake in a QR code (deflated to ~0.5 KB):
+
+1. One player taps **Host** → a QR appears.
+2. The other taps **Join → Scan invite** and scans it; their phone shows a reply QR.
+3. The host taps **Scan their reply** and scans that. Connected.
+
+The camera (`getUserMedia`) only works in a **secure context** — HTTPS or the
+**installed PWA**. So install the app once from your Pages URL, after which the
+camera (and the whole game) works offline on your local Wi-Fi. If you can't use a
+camera (e.g. visiting over plain `http://`), the **"Use a code instead"** fallback
+lets you copy/paste the same handshake. Note: some guest/corporate Wi-Fi enables
+"client isolation" which blocks device-to-device traffic — a normal home network
+won't.
 
 ## Project layout
 
@@ -71,7 +84,9 @@ index.html              app shell / all screens
 css/styles.css          styling
 js/sudoku.js            generator + solver + difficulty grader (pure, testable)
 js/storage.js           localStorage: game state, settings, stats
-js/multiplayer.js       serverless WebRTC peer (copy-paste signaling)
+js/multiplayer.js       serverless local-network WebRTC peer (no STUN/TURN)
+js/qr.js                QR rendering + camera scanning for pairing
+js/vendor/              qrcode-generator (encoder) + jsQR (decoder)
 js/app.js               UI wiring, game flow, multiplayer glue
 manifest.webmanifest    PWA manifest
 service-worker.js       offline app-shell cache
