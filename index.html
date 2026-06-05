@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>Sudoku</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<!-- ===================== HOME ===================== -->
+<section id="home" class="screen">
+  <div class="home-inner">
+    <div class="logo">
+      <div class="logo-grid" aria-hidden="true"></div>
+      <h1>Sudoku</h1>
+      <p class="tagline">No ads. Just play.</p>
+    </div>
+
+    <button id="continueBtn" class="btn btn-primary hidden">
+      <span>Continue</span>
+      <small id="continueMeta"></small>
+    </button>
+    <button id="newGameBtn" class="btn btn-primary">New Game</button>
+    <button id="multiplayerBtn" class="btn btn-ghost">Play Together</button>
+
+    <div class="home-stats">
+      <div><span class="stat-num" id="homeMonth">0</span><span class="stat-lbl">This Month</span></div>
+      <div><span class="stat-num" id="homeWins">0</span><span class="stat-lbl">Wins</span></div>
+      <div><span class="stat-num" id="homeBest">—</span><span class="stat-lbl">Best Time</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== GAME ===================== -->
+<section id="game" class="screen hidden">
+  <header class="topbar">
+    <button id="backBtn" class="icon-btn" aria-label="Back">
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div id="score" class="score">0</div>
+    <button id="settingsBtn" class="icon-btn" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <div class="statsbar">
+    <div class="stat"><span class="stat-label">This Month</span><span class="stat-value"><span class="trophy">🏆</span><span id="monthScore">0</span></span></div>
+    <div class="stat"><span class="stat-label">Difficulty</span><span class="stat-value" id="difficultyLabel">—</span></div>
+    <div class="stat"><span class="stat-label">Mistakes</span><span class="stat-value" id="mistakes">0/3</span></div>
+    <div class="stat time-stat">
+      <span class="stat-label">Time</span>
+      <span class="stat-value"><span id="timer">00:00</span></span>
+    </div>
+    <button id="pauseBtn" class="pause-btn" aria-label="Pause">
+      <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    </button>
+  </div>
+
+  <div class="board-wrap">
+    <div id="board" class="board" role="grid" aria-label="Sudoku board"></div>
+    <div id="pauseOverlay" class="board-overlay hidden">
+      <button id="resumeBtn" class="btn btn-primary">Resume</button>
+    </div>
+    <div id="coopBanner" class="coop-banner hidden"></div>
+  </div>
+
+  <div class="tools">
+    <button class="tool" id="undoBtn">
+      <svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.5-7.7L3 8"/></svg>
+      <span>Undo</span>
+    </button>
+    <button class="tool" id="eraseBtn">
+      <svg viewBox="0 0 24 24"><path d="M20 20H9L4 15a2 2 0 0 1 0-3l8-8a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-7 7"/><path d="M9 20l-5-5"/></svg>
+      <span>Erase</span>
+    </button>
+    <button class="tool" id="notesBtn">
+      <span class="badge badge-off" id="notesState">OFF</span>
+      <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+      <span>Notes</span>
+    </button>
+    <button class="tool" id="hintBtn">
+      <span class="badge badge-count" id="hintCount">3</span>
+      <svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>
+      <span>Hint</span>
+    </button>
+  </div>
+
+  <div class="numpad" id="numpad">
+    <button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button>
+    <button data-n="4">4</button><button data-n="5">5</button><button data-n="6">6</button>
+    <button data-n="7">7</button><button data-n="8">8</button><button data-n="9">9</button>
+  </div>
+</section>
+
+<!-- ===================== DIFFICULTY SHEET ===================== -->
+<div id="difficultySheet" class="sheet hidden">
+  <div class="sheet-card">
+    <h2>New Game</h2>
+    <div class="diff-list" id="diffList"></div>
+    <button class="btn btn-ghost sheet-close">Cancel</button>
+  </div>
+</div>
+
+<!-- ===================== SETTINGS SHEET ===================== -->
+<div id="settingsSheet" class="sheet hidden">
+  <div class="sheet-card">
+    <h2>Settings</h2>
+    <label class="toggle-row"><span>Highlight matching numbers</span><input type="checkbox" id="setHighlight" checked></label>
+    <label class="toggle-row"><span>Highlight peers (row/col/box)</span><input type="checkbox" id="setPeers" checked></label>
+    <label class="toggle-row"><span>Show mistakes</span><input type="checkbox" id="setMistakes" checked></label>
+    <label class="toggle-row"><span>Auto-remove notes</span><input type="checkbox" id="setAutoNotes" checked></label>
+    <label class="toggle-row"><span>Limit mistakes (3 strikes)</span><input type="checkbox" id="setLimit" checked></label>
+    <button class="btn btn-ghost sheet-close">Done</button>
+  </div>
+</div>
+
+<!-- ===================== END-OF-GAME ===================== -->
+<div id="endSheet" class="sheet hidden">
+  <div class="sheet-card center">
+    <div id="endIcon" class="end-icon">🎉</div>
+    <h2 id="endTitle">Solved!</h2>
+    <p id="endSubtitle"></p>
+    <div class="end-stats" id="endStats"></div>
+    <button class="btn btn-primary" id="endNewGame">New Game</button>
+    <button class="btn btn-ghost" id="endHome">Home</button>
+  </div>
+</div>
+
+<!-- ===================== MULTIPLAYER ===================== -->
+<div id="mpSheet" class="sheet hidden">
+  <div class="sheet-card">
+    <button class="sheet-x" id="mpClose" aria-label="Close">✕</button>
+    <h2>Play Together</h2>
+
+    <div id="mpStart" class="mp-view">
+      <p class="mp-help">Connect two devices directly — no server, no account. Works over the internet or same Wi-Fi.</p>
+      <div class="mp-mode">
+        <label><input type="radio" name="mpmode" value="coop" checked> <b>Co-op</b> — solve one board together</label>
+        <label><input type="radio" name="mpmode" value="vs"> <b>Versus</b> — same puzzle, race to finish</label>
+      </div>
+      <div class="mp-diff">
+        <span>Difficulty</span>
+        <select id="mpDifficulty"></select>
+      </div>
+      <button class="btn btn-primary" id="mpHostBtn">Host a game</button>
+      <button class="btn btn-ghost" id="mpJoinBtn">Join a game</button>
+    </div>
+
+    <div id="mpHost" class="mp-view hidden">
+      <p class="mp-help">1. Send this <b>invite code</b> to your partner.</p>
+      <textarea id="mpOfferOut" class="mp-code" readonly placeholder="Generating…"></textarea>
+      <button class="btn btn-small" id="mpCopyOffer">Copy invite</button>
+      <p class="mp-help">2. Paste the <b>reply code</b> they send back, then connect.</p>
+      <textarea id="mpAnswerIn" class="mp-code" placeholder="Paste reply code here…"></textarea>
+      <button class="btn btn-primary" id="mpConnectHost">Connect</button>
+      <button class="btn btn-ghost mp-back">Back</button>
+    </div>
+
+    <div id="mpJoin" class="mp-view hidden">
+      <p class="mp-help">1. Paste the <b>invite code</b> from your partner.</p>
+      <textarea id="mpOfferIn" class="mp-code" placeholder="Paste invite code here…"></textarea>
+      <button class="btn btn-primary" id="mpGenAnswer">Generate reply</button>
+      <p class="mp-help">2. Send this <b>reply code</b> back to them.</p>
+      <textarea id="mpAnswerOut" class="mp-code" readonly placeholder="Appears after step 1…"></textarea>
+      <button class="btn btn-small" id="mpCopyAnswer">Copy reply</button>
+      <button class="btn btn-ghost mp-back">Back</button>
+    </div>
+
+    <div id="mpStatus" class="mp-status"></div>
+  </div>
+</div>
+
+<!-- Loading overlay while generating -->
+<div id="loading" class="loading hidden"><div class="spinner"></div><span>Generating…</span></div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
