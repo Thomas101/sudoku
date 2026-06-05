@@ -220,7 +220,7 @@ function applyHighlights() {
   const selVal = sel != null ? game.grid[sel] : 0;
   for (let i = 0; i < 81; i++) {
     const c = cells[i];
-    c.classList.remove('selected', 'peer', 'same', 'bad');
+    c.classList.remove('selected', 'peer', 'same', 'bad', 'oppsel');
 
     // Tint the matching pencil mark (just the digit, not the cell) when a
     // cell holding that value is selected.
@@ -239,6 +239,8 @@ function applyHighlights() {
     if (settings.peers && (r === sr || col === scol || b === sb)) c.classList.add('peer');
     if (settings.highlight && selVal !== 0 && game.grid[i] === selVal) c.classList.add('same');
   }
+  // Overlay the partner's selected cell (co-op) on top of our own highlights.
+  if (net && net.oppSel != null && cells[net.oppSel]) cells[net.oppSel].classList.add('oppsel');
 }
 
 function renderAll() {
@@ -270,6 +272,8 @@ function selectCell(i) {
   if (game.status !== 'playing') return;
   game.selected = i;
   applyHighlights();
+  // Mirror our selection to a co-op partner so they see what we're looking at.
+  if (net && net.mode === 'coop') net.peer.send({ t: 'sel', i });
 }
 
 let undoStack = [];
@@ -546,7 +550,7 @@ function updateCoopBanner() {
 }
 
 function wireNet(peer, mode, role) {
-  net = { peer, mode, role, oppDone: false, oppName: '' };
+  net = { peer, mode, role, oppDone: false, oppName: '', oppSel: null };
   // Greet with our name as soon as the channel is up (both sides).
   peer.on('open', () => peer.send({ t: 'hello', name: myName }));
   peer.on('message', msg => {
@@ -566,6 +570,9 @@ function wireNet(peer, mode, role) {
       toast(`Connected with ${oppName()}!`);
     } else if (msg.t === 'move') {
       applyRemoteMove(msg);
+    } else if (msg.t === 'sel') {
+      net.oppSel = (typeof msg.i === 'number') ? msg.i : null;
+      if (game) applyHighlights();
     } else if (msg.t === 'prog') {
       const pct = Math.round((msg.filled / 81) * 100);
       showOpp(`${oppName()}: ${pct}%${msg.mistakes ? ` · ${msg.mistakes} mistake${msg.mistakes > 1 ? 's' : ''}` : ''}`);
