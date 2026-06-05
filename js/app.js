@@ -274,7 +274,10 @@ function selectCell(i) {
 
 let undoStack = [];
 function pushUndo(i) {
-  undoStack.push({ i, value: game.grid[i], notes: game.notes[i].slice(), mistakes: game.mistakes, score: game.score });
+  // Note: mistakes are intentionally NOT snapshotted — undo never refunds a
+  // strike (otherwise you could play forever). Score is restored so undoing a
+  // correct placement also removes the points it earned.
+  undoStack.push({ i, value: game.grid[i], notes: game.notes[i].slice(), score: game.score });
   if (undoStack.length > 200) undoStack.shift();
 }
 
@@ -321,14 +324,16 @@ function inputNumber(n) {
   afterMove(i, { value: n, correct });
 }
 
+// Remove pencil-mark `n` from every cell sharing this cell's row, column or box.
 function clearPeerNotes(i, n) {
-  const r = (i / 9) | 0, col = i % 9, b = ((r / 3 | 0) * 3 + (col / 3 | 0));
-  for (let j = 0; j < 81; j++) {
-    if (j === i) continue;
-    const jr = (j / 9) | 0, jc = j % 9, jb = ((jr / 3 | 0) * 3 + (jc / 3 | 0));
-    if ((jr === r || jc === col || jb === b) && game.notes[j].includes(n)) {
-      game.notes[j] = game.notes[j].filter(x => x !== n);
-      renderCell(j);
+  const units = [UNITS[ROW(i)], UNITS[9 + COL(i)], UNITS[18 + BOX(i)]];
+  const seen = new Set();
+  for (const unit of units) {
+    for (const j of unit) {
+      if (j === i || seen.has(j)) continue;
+      seen.add(j);
+      const idx = game.notes[j].indexOf(n);
+      if (idx >= 0) { game.notes[j].splice(idx, 1); renderCell(j); }
     }
   }
 }
@@ -364,9 +369,7 @@ function undo() {
   const last = undoStack.pop();
   game.grid[last.i] = last.value;
   game.notes[last.i] = last.notes;
-  game.mistakes = last.mistakes;
-  game.score = last.score;
-  updateMistakes();
+  game.score = last.score; // mistakes are permanent — not restored
   renderCell(last.i);
   applyHighlights();
   updateNumpad();
