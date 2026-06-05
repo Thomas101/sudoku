@@ -198,6 +198,7 @@ body { display: flex; justify-content: center; }
   pointer-events: none;
 }
 .notes span { display: grid; place-items: center; }
+.notes span.note-hl { color: var(--entry); font-weight: 800; transform: scale(1.25); }
 
 .board-overlay {
   position: absolute; inset: 0 var(--pad);

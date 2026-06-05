@@ -221,6 +221,17 @@ function applyHighlights() {
   for (let i = 0; i < 81; i++) {
     const c = cells[i];
     c.classList.remove('selected', 'peer', 'same', 'bad');
+
+    // Tint the matching pencil mark (just the digit, not the cell) when a
+    // cell holding that value is selected.
+    const notesEl = c.querySelector('.notes');
+    if (notesEl) {
+      for (const s of notesEl.children) s.classList.remove('note-hl');
+      if (settings.highlight && selVal !== 0 && game.notes[i].includes(selVal)) {
+        notesEl.children[selVal - 1].classList.add('note-hl');
+      }
+    }
+
     if (sel == null) continue;
     if (i === sel) { c.classList.add('selected'); continue; }
     const sr = (sel / 9) | 0, scol = sel % 9, sb = ((sr / 3 | 0) * 3 + (scol / 3 | 0));
