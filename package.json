@@ -8,6 +8,6 @@
   "author": "Thomas Beverley",
   "scripts": {
     "start": "python3 -m http.server 8000",
-    "test": "node test/engine.test.mjs"
+    "test": "node test/engine.test.mjs && node test/sdp.test.mjs"
   }
 }
