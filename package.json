@@ -1,6 +1,6 @@
 {
   "name": "sudoku-pwa",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
   "description": "Ad-free Sudoku PWA — static, client-side, with co-op/versus over WebRTC.",

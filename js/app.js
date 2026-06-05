@@ -11,7 +11,7 @@ import * as sound from './sound.js';
 // ---------------------------------------------------------------------------
 // Bump on every deploy so it's easy to tell when GitHub Pages has served the
 // new build (shown on the home screen).
-const APP_VERSION = 'v1.1.1';
+const APP_VERSION = 'v1.1.2';
 
 const DIFF_META = {
   easy:    { label: 'Easy',    dots: 1, base: 5 },
@@ -678,22 +678,21 @@ function discardPending() {
 }
 
 let soundStopListen = null;  // releases the mic
-let soundChirping = false;   // gates the transmit loop
+let soundActive = false;     // true while a sound-pairing attempt is running
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const channelOpen = peer => !!(peer && peer.channel && peer.channel.readyState === 'open');
 async function startSoundListen(onBytes) {
   try { soundStopListen = await sound.listen(onBytes); }
   catch { mpStatus('Microphone needed for sound pairing. Allow mic access and try again.', 'err'); }
 }
-async function startSoundChirp(msg, isDone) {
-  if (soundChirping) return;
-  soundChirping = true;
-  while (soundChirping && !isDone()) {
-    try { await sound.send(msg); } catch { break; }
-    await new Promise(r => setTimeout(r, 700)); // brief gap so the partner can reply
-  }
-  soundChirping = false;
+// Poll until `pred()` holds or we hit the timeout (used for the silent listen
+// window — sound is half-duplex, so the two phones must take turns).
+async function waitUntil(pred, timeoutMs) {
+  const t0 = Date.now();
+  while (!pred() && Date.now() - t0 < timeoutMs) await sleep(150);
 }
 function stopSoundPairing() {
-  soundChirping = false;
+  soundActive = false;
   sound.stopPlayback();
   if (soundStopListen) { try { soundStopListen(); } catch {} soundStopListen = null; }
 }
@@ -755,6 +754,9 @@ async function mpHost() {
 }
 
 // Host over sound: chirp our offer on a loop while listening for the reply.
+// Host over sound. Sound is half-duplex, so we take turns: announce the invite,
+// then go quiet for a listen window long enough for the guest to reply, and
+// repeat until we hear the answer (or connect).
 async function mpHostSound() {
   if (!sound.available()) return mpStatus('Sound pairing needs the ggwave library — see js/vendor/README.', 'err');
   const peer = prepareHostPeer();
@@ -763,15 +765,22 @@ async function mpHostSound() {
   let offer;
   try { offer = await peer.createOfferBytes(); }
   catch (e) { return mpStatus('Could not start sound pairing: ' + e.message, 'err'); }
+  const offerMsg = tagged(TAG_OFFER, offer);
   let answered = false;
+  soundActive = true;
   await startSoundListen(async bytes => {
     if (answered || bytes[0] !== TAG_ANSWER) return; // ignore our own offer echo
     answered = true;
     try { await peer.acceptAnswerBytes(bytes.slice(1)); mpStatus('🔊 Got the reply — connecting…', 'ok'); }
-    catch { answered = false; mpStatus('Reply was garbled — keep holding still…'); }
+    catch { answered = false; mpStatus('Reply garbled — still listening…'); }
   });
-  mpStatus('🔊 Hold your phones together…');
-  startSoundChirp(tagged(TAG_OFFER, offer), () => answered);
+  while (soundActive && !answered && !channelOpen(peer)) {
+    mpStatus('🔊 Inviting — hold your phones together…');
+    await sound.send(offerMsg);            // ~9s: our turn to talk
+    if (!soundActive) break;
+    mpStatus('🔊 Listening for their reply…');
+    await waitUntil(() => answered || channelOpen(peer) || !soundActive, 14000); // quiet: their turn
+  }
 }
 
 // Host scans the guest's reply QR to complete the handshake.
@@ -800,24 +809,30 @@ function mpJoinStart() {
   mpStatus('Scan the invite to continue.');
 }
 
-// Join over sound: listen for the host's offer, then chirp our reply back.
+// Join over sound. Listen for the invite; once we hear it, wait a beat for the
+// host to stop talking and switch to listening, then reply. We reply once per
+// invite we hear (the host repeats until it gets through), and never transmit
+// and listen at the same time — that overlap is what breaks half-duplex audio.
 async function mpJoinSound() {
   if (!sound.available()) return mpStatus('Sound pairing needs the ggwave library — see js/vendor/README.', 'err');
   const peer = prepareGuestPeer();
   mpView('mpJoin');
   hide($('#mpJoinReply'));
   mpStatus('🔊 Listening for an invite — hold your phones together…');
-  let handled = false;
+  soundActive = true;
+  let answerMsg = null;  // computed once from the first clean invite, then re-used
+  let replying = false;
   await startSoundListen(async bytes => {
-    if (handled || bytes[0] !== TAG_OFFER) return;
-    handled = true;
-    let answer;
-    try { answer = await peer.acceptOfferBytes(bytes.slice(1)); }
-    catch { handled = false; mpStatus('Invite was garbled — keep holding still…'); return; }
-    mpStatus('🔊 Heard it — replying…', 'ok');
-    // Chirp the answer until the data channel opens (init message arrives).
-    startSoundChirp(tagged(TAG_ANSWER, answer),
-      () => !!(net && net.peer && net.peer.channel && net.peer.channel.readyState === 'open'));
+    if (!soundActive || replying || channelOpen(peer) || bytes[0] !== TAG_OFFER) return;
+    replying = true;
+    try {
+      if (!answerMsg) answerMsg = tagged(TAG_ANSWER, await peer.acceptOfferBytes(bytes.slice(1)));
+      mpStatus('🔊 Heard it — replying…', 'ok');
+      await sleep(600); // let the host finish talking and start listening
+      if (soundActive && !channelOpen(peer)) await sound.send(answerMsg); // ~9s: our turn
+    } catch { mpStatus('Invite garbled — still listening…'); }
+    replying = false;
+    if (soundActive && !channelOpen(peer)) mpStatus('🔊 Listening for the invite again…');
   });
 }
 
