@@ -36,6 +36,8 @@
       <div><span class="stat-num" id="homeWins">0</span><span class="stat-lbl">Wins</span></div>
       <div><span class="stat-num" id="homeBest">—</span><span class="stat-lbl">Best Time</span></div>
     </div>
+
+    <div class="app-version" id="appVersion"></div>
   </div>
 </section>
 
@@ -207,8 +209,8 @@
 
 <script src="js/vendor/qrcode.js"></script>
 <script src="js/vendor/jsQR.js"></script>
-<!-- Optional: acoustic pairing modem. Absent by default — see js/vendor/README.md.
-     When missing, "Pair by sound" is hidden and QR pairing is unaffected. -->
+<!-- Acoustic pairing modem (ggwave, optional). If this file is ever removed,
+     "Pair by sound" simply hides itself and QR pairing is unaffected. -->
 <script src="js/vendor/ggwave.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>

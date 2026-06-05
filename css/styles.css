@@ -104,6 +104,7 @@ body { display: flex; justify-content: center; }
 .home-stats > div { display: flex; flex-direction: column; align-items: center; }
 .stat-num { font-size: 22px; font-weight: 700; color: var(--entry); }
 .stat-lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.app-version { text-align: center; margin-top: 18px; font-size: 11px; color: var(--muted); opacity: .7; }
 
 /* ---------- topbar ---------- */
 .topbar {

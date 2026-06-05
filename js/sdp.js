@@ -97,7 +97,10 @@ export function minify(sdp, type) {
   const fpBytes = hexToBytes(fp.replace(/:/g, ''));
   if (fpBytes.length !== 32) throw new Error('unexpected fingerprint length');
 
-  const cands = parseCandidates(sdp).slice(0, 4);
+  // Cap candidates: on a single LAN the first one or two host candidates are
+  // enough, and keeping the blob small matters for the audio transport (it must
+  // fit ggwave's 140-byte payload after base64).
+  const cands = parseCandidates(sdp).slice(0, 2);
 
   const w = new Writer();
   const header = (type === 'answer' ? 1 : 0) | ((SETUP_CODE[setup] ?? 0) << 1);

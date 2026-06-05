@@ -38,6 +38,7 @@ async function ensure() {
   if (!available()) throw new Error('ggwave library not loaded');
   if (!modulePromise) modulePromise = globalThis.ggwave_factory();
   ggwave = await modulePromise;
+  ggwave.disableLog?.(); // silence ggwave's per-frame decode chatter in the console
   if (!ctx) ctx = new (globalThis.AudioContext || globalThis.webkitAudioContext)({ sampleRate: 48000 });
   if (ctx.state === 'suspended') await ctx.resume();
   if (!instance) {

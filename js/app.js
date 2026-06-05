@@ -9,6 +9,10 @@ import * as sound from './sound.js';
 // ---------------------------------------------------------------------------
 // Difficulty presentation
 // ---------------------------------------------------------------------------
+// Bump on every deploy so it's easy to tell when GitHub Pages has served the
+// new build (shown on the home screen).
+const APP_VERSION = 'v1.1.0';
+
 const DIFF_META = {
   easy:    { label: 'Easy',    dots: 1, base: 5 },
   medium:  { label: 'Medium',  dots: 2, base: 8 },
@@ -909,6 +913,7 @@ function init() {
   buildBoard();
   fillMpDifficulty();
   updateHome();
+  $('#appVersion').textContent = APP_VERSION;
 
   // Keep the browser chrome colour in sync when the OS theme flips (auto mode).
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(settings.theme));

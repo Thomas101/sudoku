@@ -7,31 +7,23 @@ of the app.
 |------|--------|---------|---------|
 | `qrcode.js` | `QRCode` | `js/qr.js` | Render pairing QR codes |
 | `jsQR.js` | `jsQR` | `js/qr.js` | Decode QR codes from the camera |
-| `ggwave.js` | `ggwave_factory` | `js/sound.js` | **Optional** acoustic modem for "Pair by sound" |
+| `ggwave.js` | `ggwave_factory` | `js/sound.js` | Acoustic modem for "Pair by sound" |
 
-## Enabling "Pair by sound" (ggwave)
+## ggwave (acoustic pairing)
 
-`ggwave.js` is **not** committed. When it's absent the app simply hides the
-"Pair by sound" buttons and QR pairing works exactly as before. To enable
-acoustic pairing, drop the ggwave web build into this folder:
+`js/vendor/ggwave.js` is the upstream **0.4.0** web build, vendored verbatim
+(MIT, © Georgi Gerganov — https://github.com/ggerganov/ggwave). It's the
+single-file build with the WASM **inlined as base64**, so there is no separate
+`.wasm` to locate (handy under a GitHub Pages subpath). It exposes the global
+`ggwave_factory`.
 
-```
-js/vendor/ggwave.js     # emscripten module exposing window.ggwave_factory
-js/vendor/ggwave.wasm   # (only if your build loads the .wasm separately)
-```
+The app talks to ggwave only through `js/sound.js`, which exchanges raw bytes
+(base64-wrapped over the air). The payload is the minified WebRTC offer/answer
+from `js/sdp.js` (~90 bytes), capped to fit ggwave's 140-byte limit in one chirp.
 
-Get it from the upstream project — https://github.com/ggerganov/ggwave — e.g.
-the prebuilt files published on npm/CDN:
+If this file is ever removed, `sound.available()` returns false, the "Pair by
+sound" controls hide themselves, and QR pairing is completely unaffected.
 
-```
-https://cdn.jsdelivr.net/npm/ggwave/ggwave.js
-https://cdn.jsdelivr.net/npm/ggwave/ggwave.wasm
-```
-
-(Download with the network allowed, or copy from a local `npm i ggwave`.)
-`index.html` already references `js/vendor/ggwave.js`; once the file is present,
-the "Pair by sound" option appears automatically.
-
-> The app talks to ggwave only through `js/sound.js`, which exchanges raw bytes
-> (base64-wrapped over the air). The payload is the minified WebRTC offer/answer
-> from `js/sdp.js` (~90 bytes), small enough for a single short chirp.
+To update: `npm pack ggwave` (or download the tarball from
+`https://registry.npmjs.org/ggwave/-/ggwave-<version>.tgz`), then copy
+`package/ggwave.js` here, keeping the license header.

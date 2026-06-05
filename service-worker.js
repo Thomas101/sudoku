@@ -15,6 +15,7 @@ const ASSETS = [
   'js/haptics.js',
   'js/vendor/qrcode.js',
   'js/vendor/jsQR.js',
+  'js/vendor/ggwave.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
