@@ -3,6 +3,7 @@
 const GAME_KEY = 'sudoku.game.v1';
 const STATS_KEY = 'sudoku.stats.v1';
 const SETTINGS_KEY = 'sudoku.settings.v1';
+const NAME_KEY = 'sudoku.name.v1';
 
 const DEFAULT_SETTINGS = {
   highlight: true,   // highlight matching numbers
@@ -30,6 +31,10 @@ export function clearGame() { try { localStorage.removeItem(GAME_KEY); } catch {
 // ---- settings ----
 export function loadSettings() { return { ...DEFAULT_SETTINGS, ...read(SETTINGS_KEY, {}) }; }
 export function saveSettings(s) { write(SETTINGS_KEY, s); }
+
+// ---- player name ----
+export function loadName() { return read(NAME_KEY, ''); }
+export function saveName(name) { write(NAME_KEY, name); }
 
 // ---- lifetime stats ----
 function monthKey() {

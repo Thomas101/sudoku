@@ -115,10 +115,9 @@ function startGame(state, fromNet = false) {
   renderAll();
   startTimer();
   if (!fromNet) persist();
-  // multiplayer banners
-  const banner = $('#coopBanner');
-  if (net) { show(banner); banner.textContent = net.mode === 'coop' ? 'Co-op — solving together' : 'Versus — race on!'; }
-  else hide(banner);
+  // multiplayer banner
+  if (net) updateCoopBanner();
+  else hide($('#coopBanner'));
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +383,9 @@ function endGame(won) {
     ? (vs ? (net.oppDone ? 'Too slow!' : 'You win!') : 'Solved!')
     : 'Out of moves';
   $('#endSubtitle').textContent = won
-    ? `${DIFF_META[game.difficulty].label} · clean run${game.mistakes === 0 ? ' with no mistakes!' : ''}`
+    ? (vs
+        ? (net.oppDone ? `${oppName()} finished first.` : `You beat ${oppName()}!`)
+        : `${DIFF_META[game.difficulty].label} · clean run${game.mistakes === 0 ? ' with no mistakes!' : ''}`)
     : 'You hit 3 mistakes. Try again?';
   $('#endStats').innerHTML = won
     ? `<div><span class="v">${fmt(game.elapsed)}</span><span class="k">Time</span></div>
@@ -452,31 +453,44 @@ function showOpp(text) {
   const b = $('#coopBanner');
   show(b); b.textContent = text;
 }
+const oppName = () => (net && net.oppName) || 'your partner';
+
+// Refresh the in-game banner from current mode + opponent name.
+function updateCoopBanner() {
+  if (!net) return hide($('#coopBanner'));
+  showOpp(net.mode === 'coop' ? `Co-op with ${oppName()}` : `Versus ${oppName()} — race on!`);
+}
 
 function wireNet(peer, mode, role) {
-  net = { peer, mode, role, oppDone: false };
+  net = { peer, mode, role, oppDone: false, oppName: '' };
+  // Greet with our name as soon as the channel is up (both sides).
+  peer.on('open', () => peer.send({ t: 'hello', name: myName }));
   peer.on('message', msg => {
-    if (msg.t === 'init') {
+    if (msg.t === 'hello') {
+      net.oppName = (msg.name || '').trim() || 'Player';
+      if (game) updateCoopBanner();
+    } else if (msg.t === 'init') {
       // guest receives the puzzle from host
       net.mode = msg.mode;
+      if (msg.name) net.oppName = msg.name;
       startGame({
         puzzle: msg.puzzle, solution: msg.solution, grid: msg.puzzle.slice(),
         notes: blankNotes(), difficulty: msg.difficulty, seed: msg.seed,
         mistakes: 0, hints: MAX_HINTS, score: 0, elapsed: 0, selected: null, status: 'playing',
       }, true);
       closeMpSheet();
-      toast('Connected! Game on.');
+      toast(`Connected with ${oppName()}!`);
     } else if (msg.t === 'move') {
       applyRemoteMove(msg);
     } else if (msg.t === 'prog') {
       const pct = Math.round((msg.filled / 81) * 100);
-      showOpp(`Opponent: ${pct}%${msg.mistakes ? ` · ${msg.mistakes} mistake${msg.mistakes > 1 ? 's' : ''}` : ''}`);
+      showOpp(`${oppName()}: ${pct}%${msg.mistakes ? ` · ${msg.mistakes} mistake${msg.mistakes > 1 ? 's' : ''}` : ''}`);
     } else if (msg.t === 'win') {
       net.oppDone = true;
-      if (game && game.status === 'playing') { showOpp('Opponent finished first!'); endGame(false); }
+      if (game && game.status === 'playing') { showOpp(`${oppName()} finished first!`); endGame(false); }
     } else if (msg.t === 'lost') {
       net.oppDone = true;
-      if (game && game.status === 'playing') { showOpp('Opponent busted — keep going!'); }
+      if (game && game.status === 'playing') { showOpp(`${oppName()} busted — keep going!`); }
     }
   });
   peer.on('close', () => {
@@ -488,6 +502,13 @@ function wireNet(peer, mode, role) {
 // Multiplayer UI flow
 // ---------------------------------------------------------------------------
 let pendingPeer = null;
+let myName = store.loadName();
+// Read the name field, fall back to a default, and persist it.
+function commitName() {
+  myName = ($('#mpName').value || '').trim() || 'Player';
+  store.saveName(myName);
+  return myName;
+}
 function mpView(name) {
   ['mpStart', 'mpHost', 'mpJoin'].forEach(v => hide($('#' + v)));
   show($('#' + name));
@@ -498,6 +519,7 @@ function closeMpSheet() { closeScanner(); hide($('#mpSheet')); }
 async function mpHost() {
   const mode = $('input[name=mpmode]:checked').value;
   const difficulty = $('#mpDifficulty').value;
+  commitName();
   mpView('mpHost');
   mpStatus('Creating invite…');
   const peer = new Peer();
@@ -505,12 +527,12 @@ async function mpHost() {
   wireNet(peer, mode, 'host');
   peer.on('open', async () => {
     mpStatus('Connected!', 'ok');
-    // Host generates the puzzle and ships it to the guest.
+    // Host generates the puzzle and ships it (plus its name) to the guest.
     show($('#loading'));
     await new Promise(r => setTimeout(r, 30));
     const p = generatePuzzle(difficulty);
     hide($('#loading'));
-    peer.send({ t: 'init', mode, puzzle: p.puzzle, solution: p.solution, difficulty, seed: p.seed });
+    peer.send({ t: 'init', mode, name: myName, puzzle: p.puzzle, solution: p.solution, difficulty, seed: p.seed });
     startGame({
       puzzle: p.puzzle, solution: p.solution, grid: p.puzzle.slice(), notes: blankNotes(),
       difficulty, seed: p.seed, mistakes: 0, hints: MAX_HINTS, score: 0, elapsed: 0,
@@ -520,21 +542,22 @@ async function mpHost() {
   });
   try {
     const code = await peer.createOffer();
-    $('#mpOfferOut').value = code;
     renderQR($('#mpHostQR'), code);
     mpStatus('Waiting for your partner to scan…');
   } catch (e) { mpStatus('Could not create invite: ' + e.message, 'err'); }
 }
 
+// Host scans the guest's reply QR to complete the handshake.
 async function mpConnectHost(code) {
-  code = (code || $('#mpAnswerIn').value).trim();
-  if (!code) return mpStatus('No reply code yet.', 'err');
+  code = (code || '').trim();
+  if (!code) return mpStatus('Couldn’t read that reply code.', 'err');
   try { await pendingPeer.acceptAnswer(code); mpStatus('Connecting…'); }
-  catch (e) { mpStatus('Invalid reply code.', 'err'); }
+  catch (e) { mpStatus('That reply code didn’t scan cleanly — try again.', 'err'); }
 }
 
 function mpJoinStart() {
   const mode = $('input[name=mpmode]:checked').value;
+  commitName();
   mpView('mpJoin');
   hide($('#mpJoinReply'));
   mpStatus('Scan the invite to continue.');
@@ -544,17 +567,16 @@ function mpJoinStart() {
   peer.on('open', () => mpStatus('Connected! Waiting for puzzle…', 'ok'));
 }
 
-// Guest consumes an invite (scanned or pasted) and produces a reply.
+// Guest consumes a scanned invite and produces a reply QR to show back.
 async function joinWithOffer(code) {
   code = (code || '').trim();
-  if (!code) return mpStatus('No invite code yet.', 'err');
+  if (!code) return mpStatus('Couldn’t read that invite code.', 'err');
   try {
     const answer = await pendingPeer.acceptOffer(code);
-    $('#mpAnswerOut').value = answer;
     renderQR($('#mpJoinQR'), answer);
     show($('#mpJoinReply'));
-    mpStatus('Show the reply to the host.');
-  } catch (e) { mpStatus('Invalid invite code.', 'err'); }
+    mpStatus('Show the reply for them to scan.');
+  } catch (e) { mpStatus('That invite code didn’t scan cleanly — try again.', 'err'); }
 }
 
 // ---- camera scanner ----
@@ -565,17 +587,12 @@ async function openScanner(onCode) {
     stopScan = await startScanner($('#scanVideo'), code => { closeScanner(); onCode(code); });
   } catch (e) {
     closeScanner();
-    toast('Camera unavailable — use a code instead');
+    mpStatus('Camera needed to pair. Install the app or use HTTPS, then allow camera access.', 'err');
   }
 }
 function closeScanner() {
   if (stopScan) { stopScan(); stopScan = null; }
   hide($('#scanner'));
-}
-
-async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); toast('Copied'); }
-  catch { toast('Copy failed — select and copy manually'); }
 }
 
 // ---------------------------------------------------------------------------
@@ -641,7 +658,10 @@ function init() {
     const saved = store.loadGame();
     if (saved) { net = null; startGame({ ...saved, selected: null }, true); }
   };
-  $('#multiplayerBtn').onclick = () => { mpView('mpStart'); mpStatus(''); show($('#mpSheet')); };
+  $('#multiplayerBtn').onclick = () => {
+    $('#mpName').value = store.loadName();
+    mpView('mpStart'); mpStatus(''); show($('#mpSheet'));
+  };
 
   // topbar
   $('#backBtn').onclick = leaveGame;
@@ -695,10 +715,6 @@ function init() {
   $('#mpJoinBtn').onclick = mpJoinStart;
   $('#mpScanReply').onclick = () => openScanner(code => mpConnectHost(code));
   $('#mpScanInvite').onclick = () => openScanner(code => joinWithOffer(code));
-  $('#mpConnectHost').onclick = () => mpConnectHost();
-  $('#mpGenAnswer').onclick = () => joinWithOffer($('#mpOfferIn').value);
-  $('#mpCopyOffer').onclick = () => copyText($('#mpOfferOut').value);
-  $('#mpCopyAnswer').onclick = () => copyText($('#mpAnswerOut').value);
   $('#scanCancel').onclick = closeScanner;
   $$('.mp-back').forEach(b => b.onclick = () => { closeScanner(); mpView('mpStart'); mpStatus(''); });
 

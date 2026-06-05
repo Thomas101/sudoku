@@ -252,6 +252,15 @@ body { display: flex; justify-content: center; }
 
 /* ---------- multiplayer ---------- */
 .mp-help { font-size: 14px; color: #59617a; margin: 10px 0 6px; }
+.mp-name {
+  display: flex; flex-direction: column; gap: 6px; margin: 12px 0 4px;
+  font-size: 14px; color: #59617a;
+}
+.mp-name input {
+  font-size: 17px; padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: 12px; background: #fff; color: var(--ink);
+}
+.mp-name input:focus { outline: none; border-color: var(--blue); }
 .mp-mode { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
 .mp-mode label { font-size: 15px; background: #f5f7fb; padding: 12px; border-radius: 12px; cursor: pointer; }
 .mp-diff { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 14px; font-size: 15px; }

@@ -142,6 +142,9 @@
 
     <div id="mpStart" class="mp-view">
       <p class="mp-help">Connect two devices directly on the same Wi-Fi — no server, no account, nothing leaves your network.</p>
+      <label class="mp-name">Your name
+        <input id="mpName" type="text" maxlength="16" autocomplete="off" placeholder="Player" />
+      </label>
       <div class="mp-mode">
         <label><input type="radio" name="mpmode" value="coop" checked> <b>Co-op</b> — solve one board together</label>
         <label><input type="radio" name="mpmode" value="vs"> <b>Versus</b> — same puzzle, race to finish</label>
@@ -155,33 +158,20 @@
     </div>
 
     <div id="mpHost" class="mp-view hidden">
-      <p class="mp-help">Have your partner tap <b>Join → Scan invite</b> and point their camera here:</p>
+      <p class="mp-help"><b>Step 1.</b> Have your partner tap <b>Join → Scan invite</b> and point their camera at this code:</p>
       <div id="mpHostQR" class="qr"></div>
+      <p class="mp-help"><b>Step 2.</b> When their reply code appears, scan it back:</p>
       <button class="btn btn-primary" id="mpScanReply">Scan their reply</button>
-      <details class="mp-fallback">
-        <summary>No camera? Use a code instead</summary>
-        <textarea id="mpOfferOut" class="mp-code" readonly placeholder="Generating…"></textarea>
-        <button class="btn btn-small" id="mpCopyOffer">Copy invite</button>
-        <textarea id="mpAnswerIn" class="mp-code" placeholder="Paste their reply code here…"></textarea>
-        <button class="btn btn-small" id="mpConnectHost">Connect</button>
-      </details>
       <button class="btn btn-ghost mp-back">Back</button>
     </div>
 
     <div id="mpJoin" class="mp-view hidden">
-      <p class="mp-help">Scan the invite on your partner's screen:</p>
+      <p class="mp-help"><b>Step 1.</b> Scan the invite code on your partner's screen:</p>
       <button class="btn btn-primary" id="mpScanInvite">Scan invite</button>
       <div id="mpJoinReply" class="hidden">
-        <p class="mp-help">Now show this <b>reply</b> back to them:</p>
+        <p class="mp-help"><b>Step 2.</b> Now show this <b>reply</b> for them to scan:</p>
         <div id="mpJoinQR" class="qr"></div>
       </div>
-      <details class="mp-fallback">
-        <summary>No camera? Use a code instead</summary>
-        <textarea id="mpOfferIn" class="mp-code" placeholder="Paste the invite code here…"></textarea>
-        <button class="btn btn-small" id="mpGenAnswer">Generate reply</button>
-        <textarea id="mpAnswerOut" class="mp-code" readonly placeholder="Appears after the invite…"></textarea>
-        <button class="btn btn-small" id="mpCopyAnswer">Copy reply</button>
-      </details>
       <button class="btn btn-ghost mp-back">Back</button>
     </div>
 
