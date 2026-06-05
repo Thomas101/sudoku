@@ -11,7 +11,7 @@ import * as sound from './sound.js';
 // ---------------------------------------------------------------------------
 // Bump on every deploy so it's easy to tell when GitHub Pages has served the
 // new build (shown on the home screen).
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.1.1';
 
 const DIFF_META = {
   easy:    { label: 'Easy',    dots: 1, base: 5 },
@@ -694,6 +694,7 @@ async function startSoundChirp(msg, isDone) {
 }
 function stopSoundPairing() {
   soundChirping = false;
+  sound.stopPlayback();
   if (soundStopListen) { try { soundStopListen(); } catch {} soundStopListen = null; }
 }
 

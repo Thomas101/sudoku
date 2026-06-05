@@ -33,6 +33,7 @@ export function available() { return typeof globalThis.ggwave_factory !== 'undef
 
 let modulePromise = null;
 let ctx = null, ggwave = null, instance = null;
+let playing = null; // the AudioBufferSourceNode of the chirp currently playing
 
 async function ensure() {
   if (!available()) throw new Error('ggwave library not loaded');
@@ -63,7 +64,19 @@ export async function send(bytes) {
   const src = ctx.createBufferSource();
   src.buffer = buffer;
   src.connect(ctx.destination);
-  return new Promise(resolve => { src.onended = resolve; src.start(); });
+  // A chirp is several seconds long; track it so stopPlayback() can cut it short
+  // (e.g. when the user closes the pairing sheet mid-transmission).
+  playing = src;
+  return new Promise(resolve => {
+    src.onended = () => { if (playing === src) playing = null; resolve(); };
+    src.start();
+  });
+}
+
+// Immediately silence any chirp in progress. start()/onended still fires, so a
+// pending send() promise resolves and its transmit loop can exit.
+export function stopPlayback() {
+  if (playing) { try { playing.stop(); } catch {} }
 }
 
 // Listen on the mic and call `onBytes(Uint8Array)` for each decoded payload.
