@@ -23,7 +23,7 @@ straight onto GitHub Pages.
   support on desktop (digits to fill, arrows to move, `N` notes, `H` hint,
   `U` undo, `Backspace` erase).
 - **Play Together (no server)** — two devices on the same Wi-Fi connect directly
-  via WebRTC. **Scan a QR** to pair (or paste a code as a fallback), then play:
+  via WebRTC. **Scan a QR** to pair, then play:
   - **Co-op** — one shared board, both of you filling it in together.
   - **Versus** — same puzzle, separate boards, race to finish.
 
@@ -71,13 +71,12 @@ connect. This app carries that handshake in a QR code (deflated to ~0.5 KB):
 2. The other taps **Join → Scan invite** and scans it; their phone shows a reply QR.
 3. The host taps **Scan their reply** and scans that. Connected.
 
-The camera (`getUserMedia`) only works in a **secure context** — HTTPS or the
-**installed PWA**. So install the app once from your Pages URL, after which the
-camera (and the whole game) works offline on your local Wi-Fi. If you can't use a
-camera (e.g. visiting over plain `http://`), the **"Use a code instead"** fallback
-lets you copy/paste the same handshake. Note: some guest/corporate Wi-Fi enables
-"client isolation" which blocks device-to-device traffic — a normal home network
-won't.
+Pairing is QR + camera only. The camera (`getUserMedia`) works in a **secure
+context** — i.e. over HTTPS (your `github.io` Pages URL) or the **installed PWA**.
+Install the app once and the camera (and the whole game) works offline on your
+local Wi-Fi. Over plain `http://` the browser blocks the camera, so use the HTTPS
+URL or the installed app. Note: some guest/corporate Wi-Fi enables "client
+isolation" which blocks device-to-device traffic — a normal home network won't.
 
 ## Project layout
 
@@ -103,3 +102,15 @@ solution unique. Each candidate puzzle is run through a human-style logical solv
 (naked/hidden singles, locked candidates, naked/hidden pairs, triples, X-Wing). The
 hardest technique needed plus the clue count places it in a difficulty band, so
 "Extreme" genuinely requires harder reasoning than "Easy" — not just fewer givens.
+
+## License
+
+Copyright (c) 2026 Thomas Beverley.
+
+Licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE.md)** — you're
+free to use, modify, and share it for any **noncommercial** purpose, but commercial
+use is not permitted. See [LICENSE.md](LICENSE.md) for the full terms.
+
+The bundled libraries under `js/vendor/` keep their own licenses:
+[qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT) and
+[jsQR](https://github.com/cozmo/jsQR) (Apache-2.0).
