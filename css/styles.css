@@ -104,6 +104,7 @@ body { display: flex; justify-content: center; }
 .home-stats > div { display: flex; flex-direction: column; align-items: center; }
 .stat-num { font-size: 22px; font-weight: 700; color: var(--entry); }
 .stat-lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.app-version { text-align: center; margin-top: 18px; font-size: 11px; color: var(--muted); opacity: .7; }
 
 /* ---------- topbar ---------- */
 .topbar {
@@ -171,6 +172,9 @@ body { display: flex; justify-content: center; }
 .cell.hintflash { animation: flash .8s ease; }
 @keyframes flash { 0%,100%{background:var(--bg)} 40%{background:#3aa66a} }
 .cell.remote { box-shadow: inset 0 0 0 2px #ff9f1c; }
+/* Partner's currently-selected cell (co-op), mirrored from the other device. */
+.cell.oppsel { box-shadow: inset 0 0 0 2px #9b5de5; }
+.cell.oppsel.remote { box-shadow: inset 0 0 0 2px #ff9f1c, inset 0 0 0 4px #9b5de5; }
 
 /* Region complete: a staggered pop sweeping across the unit's cells. */
 .cell.unit-done { animation: unitPop .5s ease var(--wave, 0ms) both; z-index: 3; }
@@ -206,10 +210,16 @@ body { display: flex; justify-content: center; }
   display: grid; place-items: center; border-radius: 4px;
 }
 .coop-banner {
-  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  align-self: center; margin: 12px var(--pad) 0;
   background: #fff4e0; color: #9a6400; border: 1px solid #ffd98a;
-  font-size: 12px; padding: 3px 10px; border-radius: 20px; white-space: nowrap;
+  font-size: 12px; padding: 4px 12px; border-radius: 20px; white-space: nowrap;
 }
+/* Tappable "reconnect" state after a closed tab / dropped link. */
+.coop-banner.reconnect {
+  background: var(--cell-peer); color: var(--entry); border-color: var(--blue);
+  cursor: pointer; font-weight: 600;
+}
+.coop-banner.reconnect:active { transform: scale(.97); }
 
 /* ---------- tools ---------- */
 .tools {
@@ -318,6 +328,10 @@ body { display: flex; justify-content: center; }
   width: 100%; height: 78px; resize: none; font-family: ui-monospace, Menlo, monospace;
   font-size: 11px; border: 1px solid var(--line); border-radius: 10px; padding: 8px;
   word-break: break-all; margin-bottom: 4px;
+}
+.mp-or {
+  text-align: center; color: var(--muted); font-size: 12px; margin: 12px 0 2px;
+  text-transform: uppercase; letter-spacing: 1px;
 }
 .mp-status { font-size: 14px; text-align: center; margin-top: 10px; min-height: 20px; }
 .mp-status.ok { color: var(--ok); font-weight: 600; }

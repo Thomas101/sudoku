@@ -6,6 +6,8 @@
 // offer/answer (candidates bundled in once gathering completes) is deflated and
 // base64url-encoded into a compact "code" the players exchange via QR or paste.
 
+import { minify, expand } from './sdp.js';
+
 const ICE = { iceServers: [] };
 
 // ---- compact code <-> session description ----
@@ -31,9 +33,12 @@ async function inflate(bytes) {
   return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());
 }
 
-// Encode a session description to a code. 'D' prefix = deflated, 'P' = plain
-// base64 (fallback for browsers without CompressionStream).
+// Encode a session description to a code. Prefixes: 'M' = minified binary (the
+// tiny LAN form, preferred), 'D' = deflated full SDP, 'P' = plain base64. The
+// minifier covers ordinary local connections; we fall back to the full SDP for
+// anything it can't parse so pairing never hard-fails.
 async function encode(desc) {
+  try { return 'M' + b64urlEncode(minify(desc.sdp, desc.type)); } catch { /* fall through */ }
   const json = JSON.stringify({ t: desc.type === 'offer' ? 'o' : 'a', s: desc.sdp });
   if (typeof CompressionStream !== 'undefined') return 'D' + b64urlEncode(await deflate(json));
   return 'P' + b64urlEncode(new TextEncoder().encode(json));
@@ -41,6 +46,7 @@ async function encode(desc) {
 async function decode(code) {
   code = code.trim();
   const tag = code[0], body = code.slice(1);
+  if (tag === 'M') return expand(b64urlDecode(body));
   let json;
   if (tag === 'D') json = await inflate(b64urlDecode(body));
   else if (tag === 'P') json = new TextDecoder().decode(b64urlDecode(body));
@@ -95,30 +101,34 @@ export class Peer {
     }
   }
 
-  // Host: create the data channel and produce an invite code.
-  async createOffer() {
+  // Host: create the data channel and gather a complete local offer.
+  async _makeOffer() {
     const ch = this.pc.createDataChannel('sudoku', { ordered: true });
     this._bindChannel(ch);
-    const offer = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offer);
+    await this.pc.setLocalDescription(await this.pc.createOffer());
     await waitForIce(this.pc);
-    return encode({ type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp });
+    return this.pc.localDescription;
   }
 
-  // Host: finish the handshake with the guest's reply code.
-  async acceptAnswer(code) {
-    await this.pc.setRemoteDescription(await decode(code));
-  }
-
-  // Guest: consume an invite code and produce a reply code.
-  async acceptOffer(code) {
+  // Guest: consume a remote offer and gather a complete local answer.
+  async _makeAnswer(remote) {
     this.pc.addEventListener('datachannel', e => this._bindChannel(e.channel));
-    await this.pc.setRemoteDescription(await decode(code));
-    const answer = await this.pc.createAnswer();
-    await this.pc.setLocalDescription(answer);
+    await this.pc.setRemoteDescription(remote);
+    await this.pc.setLocalDescription(await this.pc.createAnswer());
     await waitForIce(this.pc);
-    return encode({ type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp });
+    return this.pc.localDescription;
   }
+
+  // ---- QR / text-code handshake -------------------------------------------
+  async createOffer() { const d = await this._makeOffer(); return encode({ type: d.type, sdp: d.sdp }); }
+  async acceptAnswer(code) { await this.pc.setRemoteDescription(await decode(code)); }
+  async acceptOffer(code) { const d = await this._makeAnswer(await decode(code)); return encode({ type: d.type, sdp: d.sdp }); }
+
+  // ---- raw-bytes handshake (for the audio transport) ----------------------
+  // These exchange the minified blob directly, without the base64 code wrapper.
+  async createOfferBytes() { const d = await this._makeOffer(); return minify(d.sdp, d.type); }
+  async acceptAnswerBytes(bytes) { await this.pc.setRemoteDescription(expand(bytes)); }
+  async acceptOfferBytes(bytes) { const d = await this._makeAnswer(expand(bytes)); return minify(d.sdp, d.type); }
 
   close() {
     try { this.channel && this.channel.close(); } catch {}

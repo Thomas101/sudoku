@@ -4,10 +4,15 @@ import * as store from './storage.js';
 import { Peer } from './multiplayer.js';
 import { renderQR, startScanner } from './qr.js';
 import { haptic, setHaptics } from './haptics.js';
+import * as sound from './sound.js';
 
 // ---------------------------------------------------------------------------
 // Difficulty presentation
 // ---------------------------------------------------------------------------
+// Bump on every deploy so it's easy to tell when GitHub Pages has served the
+// new build (shown on the home screen).
+const APP_VERSION = 'v1.1.0';
+
 const DIFF_META = {
   easy:    { label: 'Easy',    dots: 1, base: 5 },
   medium:  { label: 'Medium',  dots: 2, base: 8 },
@@ -48,7 +53,8 @@ function toast(msg) {
 let settings = store.loadSettings();
 let stats = store.loadStats();
 let game = null;          // active game state
-let net = null;           // { peer, mode, role, oppDone }
+let net = null;           // { peer, mode, role, oppDone, oppName, oppSel }
+let resumeMp = null;      // { mode, oppName } when a saved/dropped co-op game can be re-paired
 let cells = [];           // 81 cell DOM nodes
 let tick = null;          // timer interval
 
@@ -146,6 +152,7 @@ function buildBoard() {
 // New game
 // ---------------------------------------------------------------------------
 async function newGame(difficulty) {
+  resumeMp = null;
   show($('#loading'));
   // Yield so the overlay paints before the (sometimes ~200ms) generation.
   await new Promise(r => setTimeout(r, 30));
@@ -179,9 +186,10 @@ function startGame(state, fromNet = false) {
   setNotesMode(false);
   renderAll();
   startTimer();
-  if (!fromNet) persist();
+  persist();
   // multiplayer banner
   if (net) updateCoopBanner();
+  else if (resumeMp) showReconnectBanner();
   else hide($('#coopBanner'));
 }
 
@@ -220,7 +228,7 @@ function applyHighlights() {
   const selVal = sel != null ? game.grid[sel] : 0;
   for (let i = 0; i < 81; i++) {
     const c = cells[i];
-    c.classList.remove('selected', 'peer', 'same', 'bad');
+    c.classList.remove('selected', 'peer', 'same', 'bad', 'oppsel');
 
     // Tint the matching pencil mark (just the digit, not the cell) when a
     // cell holding that value is selected.
@@ -239,6 +247,8 @@ function applyHighlights() {
     if (settings.peers && (r === sr || col === scol || b === sb)) c.classList.add('peer');
     if (settings.highlight && selVal !== 0 && game.grid[i] === selVal) c.classList.add('same');
   }
+  // Overlay the partner's selected cell (co-op) on top of our own highlights.
+  if (net && net.oppSel != null && cells[net.oppSel]) cells[net.oppSel].classList.add('oppsel');
 }
 
 function renderAll() {
@@ -270,6 +280,8 @@ function selectCell(i) {
   if (game.status !== 'playing') return;
   game.selected = i;
   applyHighlights();
+  // Mirror our selection to a co-op partner so they see what we're looking at.
+  if (net && net.mode === 'coop') net.peer.send({ t: 'sel', i });
 }
 
 let undoStack = [];
@@ -485,12 +497,14 @@ function endGame(won) {
 // Persistence
 // ---------------------------------------------------------------------------
 function persist() {
-  if (!game || net) return; // don't persist networked games
+  if (!game) return;
   if (game.status === 'won' || game.status === 'lost') return;
   store.saveGame({
     puzzle: game.puzzle, solution: game.solution, grid: game.grid, notes: game.notes,
     difficulty: game.difficulty, seed: game.seed, mistakes: game.mistakes,
     hints: game.hints, score: game.score, elapsed: game.elapsed, status: 'playing',
+    // Remember the partner so a closed tab / dropped link can re-pair and resume.
+    mp: net ? { mode: net.mode, oppName: net.oppName } : (resumeMp || null),
   });
 }
 
@@ -503,7 +517,10 @@ function updateHome() {
   const btn = $('#continueBtn');
   if (saved && saved.status === 'playing') {
     show(btn);
-    $('#continueMeta').textContent = `${DIFF_META[saved.difficulty].label} · ${fmt(saved.elapsed)}`;
+    const meta = `${DIFF_META[saved.difficulty].label} · ${fmt(saved.elapsed)}`;
+    $('#continueMeta').textContent = saved.mp
+      ? `${meta} · with ${saved.mp.oppName || 'partner'}`
+      : meta;
   } else hide(btn);
 }
 
@@ -535,9 +552,9 @@ function sendProgress() {
 }
 function showOpp(text) {
   const b = $('#coopBanner');
-  show(b); b.textContent = text;
+  show(b); b.textContent = text; b.classList.remove('reconnect');
 }
-const oppName = () => (net && net.oppName) || 'your partner';
+const oppName = () => (net && net.oppName) || (resumeMp && resumeMp.oppName) || 'your partner';
 
 // Refresh the in-game banner from current mode + opponent name.
 function updateCoopBanner() {
@@ -545,8 +562,27 @@ function updateCoopBanner() {
   showOpp(net.mode === 'coop' ? `Co-op with ${oppName()}` : `Versus ${oppName()} — race on!`);
 }
 
+// Offer to re-pair after a closed tab or dropped link (the live P2P link can't
+// survive on its own, but the board is saved so both can resync the same game).
+function showReconnectBanner() {
+  if (!resumeMp) return hide($('#coopBanner'));
+  const b = $('#coopBanner');
+  show(b); b.classList.add('reconnect');
+  b.textContent = `↻ Tap to reconnect with ${resumeMp.oppName || 'your partner'}`;
+}
+
+function openReconnect() {
+  if (!resumeMp || net) return;
+  $('#mpName').value = store.loadName();
+  const radio = $(`input[name=mpmode][value="${resumeMp.mode}"]`);
+  if (radio) radio.checked = true;
+  mpView('mpStart');
+  mpStatus(`Reconnect with ${resumeMp.oppName || 'your partner'} — one of you taps “Host a game”, the other “Join a game”.`);
+  show($('#mpSheet'));
+}
+
 function wireNet(peer, mode, role) {
-  net = { peer, mode, role, oppDone: false, oppName: '' };
+  net = { peer, mode, role, oppDone: false, oppName: '', oppSel: null };
   // Greet with our name as soon as the channel is up (both sides).
   peer.on('open', () => peer.send({ t: 'hello', name: myName }));
   peer.on('message', msg => {
@@ -554,18 +590,31 @@ function wireNet(peer, mode, role) {
       net.oppName = (msg.name || '').trim() || 'Player';
       if (game) updateCoopBanner();
     } else if (msg.t === 'init') {
-      // guest receives the puzzle from host
+      // guest receives the puzzle (or a resync) from host
       net.mode = msg.mode;
       if (msg.name) net.oppName = msg.name;
-      startGame({
-        puzzle: msg.puzzle, solution: msg.solution, grid: msg.puzzle.slice(),
-        notes: blankNotes(), difficulty: msg.difficulty, seed: msg.seed,
-        mistakes: 0, hints: MAX_HINTS, score: 0, elapsed: 0, selected: null, status: 'playing',
-      }, true);
+      if (msg.keep && game) {
+        // Versus resume: keep our own restored board, just re-link.
+        resumeMp = null;
+        updateCoopBanner();
+      } else {
+        // Fresh game, or co-op resume where we adopt the host's current board.
+        startGame({
+          puzzle: msg.puzzle, solution: msg.solution,
+          grid: msg.grid ? msg.grid.slice() : msg.puzzle.slice(),
+          notes: msg.notes ? msg.notes.map(a => a.slice()) : blankNotes(),
+          difficulty: msg.difficulty, seed: msg.seed,
+          mistakes: msg.mistakes || 0, hints: msg.hints != null ? msg.hints : MAX_HINTS,
+          score: msg.score || 0, elapsed: msg.elapsed || 0, selected: null, status: 'playing',
+        }, true);
+      }
       closeMpSheet();
       toast(`Connected with ${oppName()}!`);
     } else if (msg.t === 'move') {
       applyRemoteMove(msg);
+    } else if (msg.t === 'sel') {
+      net.oppSel = (typeof msg.i === 'number') ? msg.i : null;
+      if (game) applyHighlights();
     } else if (msg.t === 'prog') {
       const pct = Math.round((msg.filled / 81) * 100);
       showOpp(`${oppName()}: ${pct}%${msg.mistakes ? ` · ${msg.mistakes} mistake${msg.mistakes > 1 ? 's' : ''}` : ''}`);
@@ -578,7 +627,17 @@ function wireNet(peer, mode, role) {
     }
   });
   peer.on('close', () => {
-    if (net) { toast('Connection lost'); showOpp('Disconnected'); }
+    if (!net) return; // we tore it down deliberately (leaving / new game)
+    toast('Connection lost');
+    if (game && game.status === 'playing') {
+      // Keep the partner around so the player can re-pair and resume in sync.
+      resumeMp = { mode: net.mode, oppName: net.oppName };
+      net = null;
+      persist();
+      showReconnectBanner();
+    } else {
+      showOpp('Disconnected');
+    }
   });
 }
 
@@ -598,19 +657,75 @@ function mpView(name) {
   show($('#' + name));
 }
 function mpStatus(text, cls = '') { const s = $('#mpStatus'); s.textContent = text; s.className = 'mp-status ' + cls; }
-function closeMpSheet() { closeScanner(); hide($('#mpSheet')); }
+function closeMpSheet() { closeScanner(); stopSoundPairing(); hide($('#mpSheet')); }
+// During a resume the mode is fixed to the saved game; otherwise read the radios.
+const currentMode = () => (resumeMp ? resumeMp.mode : $('input[name=mpmode]:checked').value);
 
-async function mpHost() {
-  const mode = $('input[name=mpmode]:checked').value;
+// ---- sound pairing helpers ----
+// Each over-the-air payload is the minified offer/answer prefixed with a 1-byte
+// tag, so a device ignores the echo of its own chirp.
+const TAG_OFFER = 0x4f /* 'O' */, TAG_ANSWER = 0x41 /* 'A' */;
+function tagged(tag, bytes) { const out = new Uint8Array(bytes.length + 1); out[0] = tag; out.set(bytes, 1); return out; }
+
+// Drop a half-finished pairing attempt (e.g. switching QR ↔ sound) without its
+// teardown tripping the "connection lost" handling — null `net` first so the
+// discarded peer's close event is ignored.
+function discardPending() {
+  if (!pendingPeer) return;
+  const p = pendingPeer;
+  pendingPeer = null; net = null;
+  try { p.close(); } catch {}
+}
+
+let soundStopListen = null;  // releases the mic
+let soundChirping = false;   // gates the transmit loop
+async function startSoundListen(onBytes) {
+  try { soundStopListen = await sound.listen(onBytes); }
+  catch { mpStatus('Microphone needed for sound pairing. Allow mic access and try again.', 'err'); }
+}
+async function startSoundChirp(msg, isDone) {
+  if (soundChirping) return;
+  soundChirping = true;
+  while (soundChirping && !isDone()) {
+    try { await sound.send(msg); } catch { break; }
+    await new Promise(r => setTimeout(r, 700)); // brief gap so the partner can reply
+  }
+  soundChirping = false;
+}
+function stopSoundPairing() {
+  soundChirping = false;
+  if (soundStopListen) { try { soundStopListen(); } catch {} soundStopListen = null; }
+}
+
+// Build the host peer and the "what to do once connected" logic, independent of
+// the signalling transport (QR or sound). Returns the wired Peer.
+function prepareHostPeer() {
+  discardPending();
+  const mode = currentMode();
   const difficulty = $('#mpDifficulty').value;
+  const resuming = !!(resumeMp && game);
   commitName();
-  mpView('mpHost');
-  mpStatus('Creating invite…');
   const peer = new Peer();
   pendingPeer = peer;
   wireNet(peer, mode, 'host');
+  if (resuming && resumeMp.oppName) net.oppName = resumeMp.oppName;
   peer.on('open', async () => {
     mpStatus('Connected!', 'ok');
+    if (resuming) {
+      // Resume: keep our restored board and ship it so the partner resyncs.
+      const msg = { t: 'init', mode, name: myName, puzzle: game.puzzle, solution: game.solution,
+        difficulty: game.difficulty, seed: game.seed };
+      if (mode === 'coop') Object.assign(msg, { grid: game.grid, notes: game.notes,
+        elapsed: game.elapsed, mistakes: game.mistakes, score: game.score, hints: game.hints });
+      else msg.keep = true; // versus: each side keeps its own board
+      peer.send(msg);
+      resumeMp = null;
+      updateCoopBanner();
+      persist();
+      closeMpSheet();
+      toast(`Reconnected with ${oppName()}!`);
+      return;
+    }
     // Host generates the puzzle and ships it (plus its name) to the guest.
     show($('#loading'));
     await new Promise(r => setTimeout(r, 30));
@@ -624,11 +739,38 @@ async function mpHost() {
     }, true);
     closeMpSheet();
   });
+  return peer;
+}
+
+async function mpHost() {
+  const peer = prepareHostPeer();
+  mpView('mpHost');
+  mpStatus('Creating invite…');
   try {
     const code = await peer.createOffer();
     renderQR($('#mpHostQR'), code);
     mpStatus('Waiting for your partner to scan…');
   } catch (e) { mpStatus('Could not create invite: ' + e.message, 'err'); }
+}
+
+// Host over sound: chirp our offer on a loop while listening for the reply.
+async function mpHostSound() {
+  if (!sound.available()) return mpStatus('Sound pairing needs the ggwave library — see js/vendor/README.', 'err');
+  const peer = prepareHostPeer();
+  mpView('mpHost');
+  mpStatus('🔊 Starting…');
+  let offer;
+  try { offer = await peer.createOfferBytes(); }
+  catch (e) { return mpStatus('Could not start sound pairing: ' + e.message, 'err'); }
+  let answered = false;
+  await startSoundListen(async bytes => {
+    if (answered || bytes[0] !== TAG_ANSWER) return; // ignore our own offer echo
+    answered = true;
+    try { await peer.acceptAnswerBytes(bytes.slice(1)); mpStatus('🔊 Got the reply — connecting…', 'ok'); }
+    catch { answered = false; mpStatus('Reply was garbled — keep holding still…'); }
+  });
+  mpStatus('🔊 Hold your phones together…');
+  startSoundChirp(tagged(TAG_OFFER, offer), () => answered);
 }
 
 // Host scans the guest's reply QR to complete the handshake.
@@ -639,16 +781,43 @@ async function mpConnectHost(code) {
   catch (e) { mpStatus('That reply code didn’t scan cleanly — try again.', 'err'); }
 }
 
-function mpJoinStart() {
-  const mode = $('input[name=mpmode]:checked').value;
+function prepareGuestPeer() {
+  discardPending();
+  const mode = currentMode();
   commitName();
-  mpView('mpJoin');
-  hide($('#mpJoinReply'));
-  mpStatus('Scan the invite to continue.');
   const peer = new Peer();
   pendingPeer = peer;
   wireNet(peer, mode, 'guest');
   peer.on('open', () => mpStatus('Connected! Waiting for puzzle…', 'ok'));
+  return peer;
+}
+
+function mpJoinStart() {
+  prepareGuestPeer();
+  mpView('mpJoin');
+  hide($('#mpJoinReply'));
+  mpStatus('Scan the invite to continue.');
+}
+
+// Join over sound: listen for the host's offer, then chirp our reply back.
+async function mpJoinSound() {
+  if (!sound.available()) return mpStatus('Sound pairing needs the ggwave library — see js/vendor/README.', 'err');
+  const peer = prepareGuestPeer();
+  mpView('mpJoin');
+  hide($('#mpJoinReply'));
+  mpStatus('🔊 Listening for an invite — hold your phones together…');
+  let handled = false;
+  await startSoundListen(async bytes => {
+    if (handled || bytes[0] !== TAG_OFFER) return;
+    handled = true;
+    let answer;
+    try { answer = await peer.acceptOfferBytes(bytes.slice(1)); }
+    catch { handled = false; mpStatus('Invite was garbled — keep holding still…'); return; }
+    mpStatus('🔊 Heard it — replying…', 'ok');
+    // Chirp the answer until the data channel opens (init message arrives).
+    startSoundChirp(tagged(TAG_ANSWER, answer),
+      () => !!(net && net.peer && net.peer.channel && net.peer.channel.readyState === 'open'));
+  });
 }
 
 // Guest consumes a scanned invite and produces a reply QR to show back.
@@ -732,6 +901,7 @@ function readSettingsUI() {
 function leaveGame() {
   stopTimer();
   if (net) { try { net.peer.close(); } catch {} net = null; }
+  resumeMp = null;
   game = null;
   updateHome();
   goto('home');
@@ -743,6 +913,7 @@ function init() {
   buildBoard();
   fillMpDifficulty();
   updateHome();
+  $('#appVersion').textContent = APP_VERSION;
 
   // Keep the browser chrome colour in sync when the OS theme flips (auto mode).
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(settings.theme));
@@ -756,9 +927,11 @@ function init() {
   $('#newGameBtn').onclick = openDifficultySheet;
   $('#continueBtn').onclick = () => {
     const saved = store.loadGame();
-    if (saved) { net = null; startGame({ ...saved, selected: null }, true); }
+    if (saved) { net = null; resumeMp = saved.mp || null; startGame({ ...saved, selected: null }, true); }
   };
+  $('#coopBanner').onclick = () => { if (resumeMp && !net) openReconnect(); };
   $('#multiplayerBtn').onclick = () => {
+    resumeMp = null; // the Play Together button always starts a fresh session
     $('#mpName').value = store.loadName();
     mpView('mpStart'); mpStatus(''); show($('#mpSheet'));
   };
@@ -814,10 +987,14 @@ function init() {
   $('#mpClose').onclick = () => { if (pendingPeer && !net?.peer?.channel) { try { pendingPeer.close(); } catch {} } closeMpSheet(); };
   $('#mpHostBtn').onclick = mpHost;
   $('#mpJoinBtn').onclick = mpJoinStart;
+  $('#mpHostSound').onclick = mpHostSound;
+  $('#mpJoinSound').onclick = mpJoinSound;
   $('#mpScanReply').onclick = () => openScanner(code => mpConnectHost(code));
   $('#mpScanInvite').onclick = () => openScanner(code => joinWithOffer(code));
   $('#scanCancel').onclick = closeScanner;
-  $$('.mp-back').forEach(b => b.onclick = () => { closeScanner(); mpView('mpStart'); mpStatus(''); });
+  $$('.mp-back').forEach(b => b.onclick = () => { closeScanner(); stopSoundPairing(); mpView('mpStart'); mpStatus(''); });
+  // Hide the "Pair by sound" controls unless the ggwave modem is present.
+  if (!sound.available()) $$('[data-sound]').forEach(hide);
 
   // persist on hide/close
   document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
