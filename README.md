@@ -8,6 +8,8 @@ peer-to-peer link.
 Built with vanilla HTML/CSS/JS and ES modules — **no build step**, so it drops
 straight onto GitHub Pages.
 
+> Shamelessly vibecoded. 🤙
+
 ## Features
 
 - **Six difficulties** — Easy, Medium, Hard, Expert, Master, Extreme. Each puzzle
