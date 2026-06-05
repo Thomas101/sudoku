@@ -19,6 +19,12 @@ straight onto GitHub Pages.
   `localStorage`; close the tab and pick up where you left off.
 - **The usual helpers** — pencil notes, undo, erase, hints, mistake counter
   (3 strikes optional), matching-number and row/col/box highlighting.
+- **Feel & polish** — a staggered pop when you complete a row/column/box, a
+  victory wave on solve, and haptic feedback on taps and milestones (full
+  patterns on Android via the Vibration API; a best-effort single buzz on
+  iOS 17.4+, since Safari has no Vibration API). Toggle vibration in Settings.
+- **Light & dark mode** — follows your device by default; force Light or Dark
+  in Settings. Honours `prefers-reduced-motion` too.
 - **Touch-first, desktop-friendly** — big tap targets on mobile; full keyboard
   support on desktop (digits to fill, arrows to move, `N` notes, `H` hint,
   `U` undo, `Backspace` erase).

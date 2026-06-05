@@ -11,6 +11,8 @@ const DEFAULT_SETTINGS = {
   mistakes: true,    // mark wrong entries red
   autoNotes: true,   // auto-remove pencil marks when a number is placed
   limit: true,       // 3-strikes game over
+  haptics: true,     // vibration feedback
+  theme: 'auto',     // 'auto' | 'light' | 'dark'
 };
 
 function read(key, fallback) {

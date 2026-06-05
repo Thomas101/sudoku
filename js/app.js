@@ -1,8 +1,9 @@
 // app.js — UI, game flow, persistence glue and multiplayer.
-import { generatePuzzle, solve, DIFFICULTIES } from './sudoku.js';
+import { generatePuzzle, solve, DIFFICULTIES, UNITS, ROW, COL, BOX } from './sudoku.js';
 import * as store from './storage.js';
 import { Peer } from './multiplayer.js';
 import { renderQR, startScanner } from './qr.js';
+import { haptic, setHaptics } from './haptics.js';
 
 // ---------------------------------------------------------------------------
 // Difficulty presentation
@@ -52,6 +53,69 @@ let cells = [];           // 81 cell DOM nodes
 let tick = null;          // timer interval
 
 function blankNotes() { return Array.from({ length: 81 }, () => []); }
+
+// ---------------------------------------------------------------------------
+// Theme (light / dark / auto)
+// ---------------------------------------------------------------------------
+function isDarkActive(theme) {
+  return theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+}
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark') root.dataset.theme = theme;
+  else delete root.dataset.theme; // auto → follow the OS preference via CSS
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', isDarkActive(theme) ? '#0e0f12' : '#ffffff');
+}
+
+// ---------------------------------------------------------------------------
+// Region-complete celebration (a row / column / box filled correctly)
+// ---------------------------------------------------------------------------
+let doneUnits = new Set();
+const unitsOf = i => [ROW(i), 9 + COL(i), 18 + BOX(i)];
+const unitComplete = u => UNITS[u].every(c => game.grid[c] !== 0 && game.grid[c] === game.solution[c]);
+
+// Record already-complete units without animating (e.g. on resume).
+function seedDoneUnits() {
+  doneUnits = new Set();
+  for (let u = 0; u < 27; u++) if (unitComplete(u)) doneUnits.add(u);
+}
+
+// After a correct placement at `i`, flash any unit it just completed.
+function celebrateUnits(i) {
+  if (isSolved()) return; // the win wave covers the final move
+  const newly = [];
+  for (const u of unitsOf(i)) {
+    if (unitComplete(u)) { if (!doneUnits.has(u)) { doneUnits.add(u); newly.push(u); } }
+    else doneUnits.delete(u);
+  }
+  if (!newly.length) return;
+  newly.forEach(u => flashCells(UNITS[u], 'unit-done', 650));
+  haptic('region');
+}
+
+// Stagger an animation class across a list of cells, then clean up.
+function flashCells(indices, cls, base) {
+  indices.forEach((idx, k) => {
+    const c = cells[idx];
+    c.style.setProperty('--wave', (k * 45) + 'ms');
+    c.classList.remove(cls); void c.offsetWidth; // restart if mid-animation
+    c.classList.add(cls);
+    setTimeout(() => c.classList.remove(cls), base + k * 60);
+  });
+}
+
+// Victory wave: pop every cell outward from the top-left corner.
+function winWave() {
+  for (let i = 0; i < 81; i++) {
+    const order = ROW(i) + COL(i);
+    cells[i].style.setProperty('--wave', (order * 55) + 'ms');
+    cells[i].classList.remove('win-pop'); void cells[i].offsetWidth;
+    cells[i].classList.add('win-pop');
+    setTimeout(() => cells[i].classList.remove('win-pop'), 1600);
+  }
+  haptic('win');
+}
 
 // ---------------------------------------------------------------------------
 // Board construction (once)
@@ -106,6 +170,7 @@ async function newGame(difficulty) {
 function startGame(state, fromNet = false) {
   game = state;
   game.given = game.puzzle.map(v => v !== 0);
+  seedDoneUnits();
   goto('game');
   $('#difficultyLabel').textContent = DIFF_META[game.difficulty].label;
   $('#monthScore').textContent = store.currentMonthScore(stats).toLocaleString();
@@ -241,6 +306,7 @@ function inputNumber(n) {
   applyHighlights();
   updateNumpad();
   $('#score').textContent = game.score.toLocaleString();
+  if (correct) celebrateUnits(i);
   afterMove(i, { value: n, correct });
 }
 
@@ -259,6 +325,7 @@ function clearPeerNotes(i, n) {
 function registerMistake(i) {
   game.mistakes++;
   updateMistakes();
+  haptic('error');
   if (settings.limit && game.mistakes >= MAX_MISTAKES && (!net || net.mode === 'coop')) {
     setTimeout(() => endGame(false), 250);
   } else if (settings.limit && game.mistakes >= MAX_MISTAKES && net && net.mode === 'vs') {
@@ -314,6 +381,7 @@ function useHint() {
   cells[i].classList.add('hintflash');
   selectCell(i);
   updateNumpad();
+  celebrateUnits(i);
   afterMove(i, { value: game.solution[i], correct: true, hint: true });
 }
 
@@ -395,7 +463,8 @@ function endGame(won) {
 
   if (vs && won && !net.oppDone) net.peer.send({ t: 'win', seconds: game.elapsed });
   updateHome();
-  show(sheet);
+  if (won) { winWave(); setTimeout(() => show(sheet), 750); }
+  else { haptic('error'); show(sheet); }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +511,7 @@ function applyRemoteMove(msg) {
     renderCell(i);
     applyHighlights();
     updateNumpad();
+    if (game.grid[i] === game.solution[i]) celebrateUnits(i);
     if (isSolved()) endGame(true);
   }
 }
@@ -623,6 +693,8 @@ function loadSettingsUI() {
   $('#setMistakes').checked = settings.mistakes;
   $('#setAutoNotes').checked = settings.autoNotes;
   $('#setLimit').checked = settings.limit;
+  $('#setHaptics').checked = settings.haptics;
+  $('#setTheme').value = settings.theme;
 }
 function readSettingsUI() {
   settings = {
@@ -631,8 +703,12 @@ function readSettingsUI() {
     mistakes: $('#setMistakes').checked,
     autoNotes: $('#setAutoNotes').checked,
     limit: $('#setLimit').checked,
+    haptics: $('#setHaptics').checked,
+    theme: $('#setTheme').value,
   };
   store.saveSettings(settings);
+  setHaptics(settings.haptics);
+  applyTheme(settings.theme);
   if (game) renderAll();
 }
 
@@ -648,9 +724,19 @@ function leaveGame() {
 }
 
 function init() {
+  applyTheme(settings.theme);
+  setHaptics(settings.haptics);
   buildBoard();
   fillMpDifficulty();
   updateHome();
+
+  // Keep the browser chrome colour in sync when the OS theme flips (auto mode).
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(settings.theme));
+
+  // Light tap on any button / control press (Android vibrate; best-effort iOS).
+  document.addEventListener('pointerdown', e => {
+    if (e.target.closest('button, .diff-item, .mp-mode label, .toggle-row')) haptic('tap');
+  }, { passive: true });
 
   // home
   $('#newGameBtn').onclick = openDifficultySheet;
@@ -702,6 +788,7 @@ function init() {
   // sheets: generic close
   $$('.sheet-close').forEach(b => b.onclick = e => hide(e.target.closest('.sheet')));
   $$('.toggle-row input').forEach(i => i.onchange = readSettingsUI);
+  $('#setTheme').onchange = readSettingsUI;
   $('#difficultySheet').addEventListener('click', e => { if (e.target.id === 'difficultySheet') hide(e.target); });
   $('#settingsSheet').addEventListener('click', e => { if (e.target.id === 'settingsSheet') hide(e.target); });
 
